@@ -30,3 +30,864 @@ textarea{width:100%;height:330px;background:#0a1521;color:#cfe3f3;border:1px sol
 #leg span{margin-right:12px;white-space:nowrap}
 #leg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px}
 </style></head><body>
+<header><a href="index.html">← Симулятор схем</a><b>8-битный процессор из вентилей · Змейка</b></header>
+<main>
+<section>
+ <canvas id="scr" width="320" height="320" aria-label="Светодиодная матрица 16×16"></canvas>
+ <div style="color:var(--mut);margin-top:10px">Управление змейкой: стрелки или WASD на клавиатуре, либо кнопки ниже</div>
+ <div id="pad"><span></span><button data-k="1" aria-label="Вверх">▲</button><span></span><button data-k="3" aria-label="Влево">◀</button><button data-k="2" aria-label="Вниз">▼</button><button data-k="4" aria-label="Вправо">▶</button></div>
+ <div id="reg"></div><div id="stat"></div>
+</section>
+<section>
+ <div id="ctl"><button id="bRun" class="hot">Пауза</button><button id="bStep">Такт</button><button id="bAsm">Собрать в ПЗУ и запустить</button>
+ <label>частота <input id="spd" type="range" min="2" max="4.3" step="0.1" value="3.4" style="width:100px;padding:0"></label><span id="hz" style="color:var(--mut)"></span></div>
+ <textarea id="src" spellcheck="false" aria-label="Программа для ПЗУ"></textarea>
+ <div id="msg"></div>
+</section>
+</main>
+<h2 id="sysh">Вся система целиком</h2><div id="sysn">Нажмите на схеме: <b>выключатель питания</b>, <b>кнопки ▲▼◀▶</b> и <b>СБРОС</b> — они работают по-настоящему. ПЗУ здесь — матрица из транзисторов (1 = транзистор есть). Внизу — экран из светодиодов: строки включают P-транзисторы, столбцы — N-транзисторы. Красная шина — +5 В, синяя — GND. Цвет и яркость шин показывают текущие значения. Стабилизатор, таймер NE555 и дешифраторы экрана показаны блоками (внутрь не раскрыты); процессор с памятью считаются по-настоящему.</div><div id="syswrap"><canvas id="sys" aria-label="Схема системы целиком"></canvas></div>
+<div id="tools"><button id="zi">+</button><button id="zo">−</button><button id="zf">Вписать схему</button><button id="zt" class="hot">Показать транзисторы</button><button id="gB">К кнопкам</button><button id="gR">К ПЗУ</button><button id="gS">К экрану</button><span id="kp" style="display:inline-flex;gap:4px;align-items:center;color:var(--mut)">Змейка: <button data-k="3" aria-label="Влево">◀</button><button data-k="1" aria-label="Вверх">▲</button><button data-k="2" aria-label="Вниз">▼</button><button data-k="4" aria-label="Вправо">▶</button></span><span id="sel" style="color:var(--mut)"></span><span style="color:var(--mut);font-size:12px;flex-basis:100%">Сильное приближение — вид кристалла: <b style="color:#ff6b5e">красная полоса</b> — затвор (поликремний), <b style="color:#d29a3f">оранжевое</b> — P-область, <b style="color:#3fae5a">зелёное</b> — N-область, <b>белые пятна P/N</b> — сами транзисторы, синее — металл, чёрные квадраты — контакты. Пунктирный квадрат — общая область двух последовательных транзисторов (контакта там нет). Метки A, B, Y — входы и выход; метки одного цвета соединены. Яркий цвет — единица. В общей схеме: ПЗУ — матрица транзисторов (жёлтая строка — выбранное слово, красные и синие линии — разряды), а светодиодный экран с P- и N-транзисторами подключён проводами к счётчику развёртки и видеопамяти.</span><span id="leg"></span></div>
+<details id="romhelp" open><summary>ПЗУ простыми словами</summary>
+<div class="rh">
+<p><b>ПЗУ</b> — память, в которой заранее записана программа змейки. Процессор только читает команды из неё, менять их он не может.</p>
+<ol>
+<li><b>Это таблица.</b> 256 строк (слов) и 16 столбцов (битов). Каждая строка — одна команда из 16 бит.</li>
+<li><b>Адрес.</b> Номер текущей команды хранится в счётчике команд. Он идёт в дешифратор из вентилей, и тот включает ровно одну строку таблицы.</li>
+<li><b>Данные — это транзисторы.</b> Где в команде стоит 1 — на пересечении строки и столбца стоит транзистор. Где 0 — его нет. Так программа «впаяна» в схему.</li>
+<li><b>Чтение.</b> Выбранная строка открывает свои транзисторы, они тянут свои вертикальные линии к земле. Линии без транзистора остаются подтянутыми к +5 В через резистор.</li>
+<li><b>Инверсия.</b> В матрице всё наоборот (с транзистором — ноль), поэтому на выходе стоят вентили НЕ. После них команда равна записанным единицам.</li>
+<li><b>Разбор команды.</b> 16 бит делятся на поля: 4 бита — операция, 3 — регистр, 1 — «число или регистр», 8 — число или адрес. Дешифратор команд решает, что делать.</li>
+</ol>
+<p><b>Обозначения на схеме ПЗУ:</b></p><ul style="padding-left:20px;margin:6px 0">
+<li><b style="color:#c0504a">Красная полоса</b> — затвор транзисторов, линия слова.</li>
+<li><b style="color:#4a86c8">Тёмно-синяя линия</b> — земля (GND, 0 В).</li>
+<li><b style="color:#4cc2ff">Голубая</b> — линия бита, низкий уровень; <b style="color:#ff9d9d">розовая</b> — высокий (+5 В).</li>
+<li><b style="color:#3fae5a">Зелёный прямоугольник</b> — транзистор (бит 1); выводы: затвор, исток (сверху, к земле), сток (снизу, к линии бита).</li>
+<li><b>Чёрный квадрат с рамкой</b> — контакт, место реального соединения провода.</li>
+<li><b>Пересечение без чёрного квадрата</b> — провода не соединены (лежат в разных слоях).</li>
+<li><b>Зигзаг</b> — резистор, подтягивает линию бита к +5 В.</li></ul>
+<div id="romlive"></div>
+</div></details>
+<canvas id="sch" aria-label="Принципиальная схема процессора"></canvas>
+<script>
+const $=id=>document.getElementById(id);
+const SNAKE=`; ЗМЕЙКА для процессора из вентилей
+; R0=X R1=Y R2=dx R3=dy R4=голова R5=хвост
+; ОЗУ = кольцевой буфер змейки, ЭКРАН: 0 пусто 1 змейка 2 еда
+start:
+  MOV R6, 0
+clr:
+  VST [R6], 0
+  ADD R6, 1
+  JNZ clr
+  MOV R0, 7
+  MOV R1, 8
+  MOV R2, 1
+  MOV R3, 0
+  MOV R4, 0
+  MOV R5, 0
+  MOV R6, 133
+init:
+  ST [R4], R6
+  VST [R6], 1
+  ADD R4, 1
+  ADD R6, 1
+  CMP R4, 3
+  JNZ init
+food:
+  RND R6
+  VLD R7, [R6]
+  CMP R7, 0
+  JNZ food
+  VST [R6], 2
+loop:
+  MOV R7, 12
+wt:
+  TICK
+  SUB R7, 1
+  JNZ wt
+  KEY R6
+  CMP R6, 1
+  JNZ nu
+  CMP R3, 1
+  JZ nu
+  MOV R2, 0
+  MOV R3, 255
+nu:
+  CMP R6, 2
+  JNZ nd
+  CMP R3, 255
+  JZ nd
+  MOV R2, 0
+  MOV R3, 1
+nd:
+  CMP R6, 3
+  JNZ nl
+  CMP R2, 1
+  JZ nl
+  MOV R2, 255
+  MOV R3, 0
+nl:
+  CMP R6, 4
+  JNZ nr
+  CMP R2, 255
+  JZ nr
+  MOV R2, 1
+  MOV R3, 0
+nr:
+  ADD R0, R2
+  ADD R1, R3
+  CMP R0, 16
+  JNC dead
+  CMP R1, 16
+  JNC dead
+  MOV R6, R1
+  ADD R6, R6
+  ADD R6, R6
+  ADD R6, R6
+  ADD R6, R6
+  ADD R6, R0
+  VLD R7, [R6]
+  CMP R7, 1
+  JZ dead
+  CMP R7, 2
+  JZ grow
+  LD R7, [R5]
+  VST [R7], 0
+  ADD R5, 1
+  ST [R4], R6
+  ADD R4, 1
+  VST [R6], 1
+  JMP loop
+grow:
+  ST [R4], R6
+  ADD R4, 1
+  VST [R6], 1
+  JMP food
+dead:
+  MOV R7, 100
+dw:
+  TICK
+  SUB R7, 1
+  JNZ dw
+  JMP start
+`;
+// ===== Ассемблер → машинные слова 16 бит: [op4][rd3][imm1][src8] =====
+const OPC={MOV:0,ADD:1,SUB:2,AND:3,OR:4,XOR:5,SHR:6,CMP:7,LD:8,ST:9,VLD:10,VST:11,KEY:12,RND:13,TICK:14};
+const NARG={KEY:1,RND:1,TICK:0};
+const JC={JMP:0,JZ:1,JE:1,JNZ:2,JNE:2,JC:3,JB:3,JNC:4,JAE:4};
+function nu(s,n){let x;if(/^-?\d+$/.test(s))x=+s;else if(/^0x[0-9a-f]+$/i.test(s))x=parseInt(s,16);else throw`Строка ${n}: непонятный операнд «${s}»`;return x&255}
+function asm(src){
+ const lab={},raw=[];
+ src.split('\n').forEach((l,n)=>{l=l.split(';')[0].trim();let m;while(m=l.match(/^(\w+):\s*(.*)$/)){lab[m[1].toLowerCase()]=raw.length;l=m[2]}if(l)raw.push([l,n+1])});
+ return raw.map(([l,n])=>{
+  const sp=l.search(/\s/),o=(sp<0?l:l.slice(0,sp)).toUpperCase(),args=sp<0?[]:l.slice(sp).split(',').map(s=>s.trim());
+  const E=m=>{throw`Строка ${n}: ${m}`};
+  if(o in JC){const t=lab[(args[0]||'').toLowerCase()];if(t===undefined)E('нет метки «'+args[0]+'»');return 15<<12|JC[o]<<9|t}
+  if(!(o in OPC))E('неизвестная команда '+o);
+  const p=args.map(s=>{let m;if(m=s.match(/^r([0-7])$/i))return{t:'r',v:+m[1]};if(m=s.match(/^\[\s*r([0-7])\s*\]$/i))return{t:'m',r:1,v:+m[1]};if(m=s.match(/^\[\s*(.+?)\s*\]$/))return{t:'m',r:0,v:nu(m[1],n)};return{t:'i',v:nu(s,n)}});
+  const k=NARG[o]??2;if(p.length!=k)E(`${o}: нужно операндов ${k}`);
+  let w=OPC[o]<<12;const a=p[0],b=p[1];
+  if(!k)return w;
+  if(o=='ST'||o=='VST'){if(a.t!='m'||!a.r)E('адрес записи — [Rn]');w|=a.v<<9}
+  else{if(a.t!='r')E('первый операнд — регистр');w|=a.v<<9}
+  if(k==2){if(o=='LD'||o=='VLD'){if(b.t!='m')E('нужен [адрес]');w|=(b.r?0:256)|b.v}else{if(b.t=='m')E('[ ] здесь не нужны');w|=(b.t=='i'?256:0)|b.v}}
+  return w})}
+
+// ===== Сборка схемы из вентилей =====
+const ELS=[],DFFS=[],blocks=[];let nn=2,grp='';
+const el=(t,a,b)=>{const o=nn++;ELS.push({t,a,b,o,g:grp});return o};
+const NOT=a=>el(0,a,0),AND=(a,b)=>el(1,a,b),OR=(a,b)=>el(2,a,b),XOR=(a,b)=>el(3,a,b);
+const mux=(s,a,b,ns)=>OR(AND(a,ns??NOT(s)),AND(b,s)); // s?b:a
+const vmux=(s,A,B)=>{const ns=NOT(s);return A.map((a,i)=>mux(s,a,B[i],ns))};
+const tree=(f,l)=>{while(l.length>1){const r=[];for(let i=0;i<l.length;i+=2)r.push(i+1<l.length?f(l[i],l[i+1]):l[i]);l=r}return l[0]};
+const reg=n=>{const q=[...Array(n)].map(()=>nn++),base=DFFS.length;q.forEach(x=>DFFS.push({q:x,d:0,g:grp}));return{q,set:d=>d.forEach((x,i)=>DFFS[base+i].d=x)}};
+const blk=o=>{blocks.push({...o,g:grp});ELS.push({t:4,a:blocks.length-1,b:0,o:0,g:grp})};
+const rm=(sel,arrs)=>{let l=arrs;for(const s of sel){const ns=NOT(s),r=[];for(let i=0;i<l.length;i+=2)r.push(l[i].map((a,k)=>mux(s,a,l[i+1][k],ns)));l=r}return l[0]};
+let LL=new Int32Array(512).fill(-1e9),romEl=null,WLN,BLN,COLS=[...Array(16)].map(()=>[]),ramG=0,vrG=0,tickG=0,cycN=0,lastR=[0,0],lastV=[0,0],v,ROMW=[],RAM=new Uint8Array(256),VR=new Uint8Array(256),pcQ,rfQ,zQ,cQ,ack,tickN,keyN,btnN,btnUntil=[0,0,0,0],tickL=0,key=0;
+const num=l=>l.reduce((s,n,i)=>s|v[n]<<i,0);
+(function buildCPU(){
+ btnN=[nn++,nn++,nn++,nn++];tickN=nn++;grp='Кнопки';const kl=reg(3);keyN=kl.q;
+ {const any=OR(OR(btnN[0],btnN[1]),OR(btnN[2],btnN[3])),nany=NOT(any),kc=[OR(btnN[0],btnN[2]),OR(btnN[1],btnN[2]),btnN[3]];kl.set(kc.map((c,i)=>mux(any,kl.q[i],c,nany)))}
+ grp='Счётчик команд';const pc=reg(8);pcQ=pc.q;
+ grp='ПЗУ';
+ const npa=pc.q.map(NOT),dec4=(b,nb)=>[...Array(16)].map((_,i)=>AND(AND(i&1?b[0]:nb[0],i&2?b[1]:nb[1]),AND(i&4?b[2]:nb[2],i&8?b[3]:nb[3])));
+ const Lw=dec4(pc.q.slice(0,4),npa.slice(0,4)),Hw=dec4(pc.q.slice(4),npa.slice(4));
+ WLN=[...Array(256)].map((_,a)=>AND(Hw[a>>4],Lw[a&15]));
+ BLN=[...Array(16)].map(()=>nn++);
+ blk({ins:WLN,outs:BLN,kind:'rom',w:600,h:3250,inPos:i=>12*i+4,outPos:i=>[600,3110+(15-i)*8],ev(){for(let j=0;j<16;j++){let o=0;const l=COLS[j];for(let k=0;k<l.length;k++)if(v[l[k]]){o=1;break}v[BLN[j]]=o^1}}});
+ const inst=BLN.map(NOT);
+ grp='Дешифратор';
+ const op=inst.slice(12),rd=inst.slice(9,12),im=inst[8],src=inst.slice(0,8),nop=op.map(NOT),nrd=rd.map(NOT);
+ const O=[...Array(16)].map((_,i)=>tree(AND,op.map((b,k)=>i>>k&1?b:nop[k])));
+ const D=[...Array(8)].map((_,i)=>tree(AND,rd.map((b,k)=>i>>k&1?b:nrd[k])));
+ grp='Регистры';const rf=[...Array(8)].map(()=>reg(8));rfQ=rf.map(r=>r.q);
+ const A=rm(rd,rfQ),B=vmux(im,rm(src.slice(0,3),rfQ),src);
+ grp='АЛУ';
+ const sub=OR(O[2],O[7]),Bx=B.map(b=>XOR(b,sub));let c=sub;
+ const sum=A.map((a,i)=>{const x=XOR(a,Bx[i]),s=XOR(x,c);c=OR(AND(a,Bx[i]),AND(x,c));return s}),cout=c;
+ const sS=tree(OR,[O[1],O[2],O[7]]);
+ const alu=A.map((a,i)=>tree(OR,[AND(sum[i],sS),AND(AND(a,B[i]),O[3]),AND(OR(a,B[i]),O[4]),AND(XOR(a,B[i]),O[5]),...(i<7?[AND(A[i+1],O[6])]:[])]));
+ grp='ОЗУ';const ra=vmux(O[8],A,B),ramO=[...Array(8)].map(()=>nn++);
+ blk({ins:[...ra,...B,O[9]],outs:ramO,ev(){const a=num(ra);ramO.forEach((n,i)=>v[n]=RAM[a]>>i&1)},clk(){if(v[O[9]])RAM[num(ra)]=num(B)}});
+ grp='Экран';const va=vmux(O[10],A,B),vO=[nn++,nn++];
+ blk({ins:[...va,B[0],B[1],O[11]],outs:vO,ev(){const x=VR[num(va)];v[vO[0]]=x&1;v[vO[1]]=x>>1&1},clk(){if(v[O[11]])VR[num(va)]=num([B[0],B[1]])}});
+ grp='ГСЧ';const lf=reg(8);lf.set([XOR(XOR(lf.q[7],lf.q[5]),XOR(lf.q[4],lf.q[3])),...lf.q.slice(0,7)]);
+ grp='Управление';
+ const wd=B.map((b,i)=>tree(OR,[alu[i],AND(b,O[0]),AND(ramO[i],O[8]),AND(lf.q[i],O[13]),...(i<2?[AND(vO[i],O[10])]:[]),...(i<3?[AND(keyN[i],O[12])]:[])]));
+ const rw=tree(OR,[0,1,2,3,4,5,6,8,10,12,13].map(i=>O[i]));
+ rf.forEach((r,i)=>{const we=AND(rw,D[i]),nw=NOT(we);r.set(r.q.map((q,k)=>mux(we,q,wd[k],nw)))});
+ grp='Флаги';const Z=reg(1),Cf=reg(1);zQ=Z.q[0];cQ=Cf.q[0];
+ const fe=tree(OR,[1,2,3,4,5,6,7].map(i=>O[i]));
+ Z.set([mux(fe,zQ,NOT(tree(OR,alu)))]);
+ Cf.set([mux(fe,cQ,OR(AND(O[1],cout),AND(sub,NOT(cout))))]);
+ grp='Счётчик команд';
+ let cr=1;const inc=pc.q.map(q=>{const s=XOR(q,cr);cr=AND(q,cr);return s});
+ const take=AND(O[15],tree(OR,[D[0],AND(D[1],zQ),AND(D[2],NOT(zQ)),AND(D[3],cQ),AND(D[4],NOT(cQ))]));
+ const stall=AND(O[14],NOT(tickN));
+ pc.set(vmux(stall,vmux(take,inc,src),pc.q));
+ ack=AND(O[14],tickN);
+ grp='Развёртка экрана';
+ const scn=reg(8);{let c2=1;scn.set(scn.q.map(q=>{const s=XOR(q,c2);c2=AND(q,c2);return s}))}
+ const nsq=scn.q.map(NOT),RWS=dec4(scn.q.slice(4),nsq.slice(4)),CLS=dec4(scn.q.slice(0,4),nsq.slice(0,4));
+ const pg=nn++,pr2=nn++;
+ blk({ins:scn.q,outs:[pg,pr2],ev(){const x=VR[num(scn.q)];v[pg]=x&1;v[pr2]=x>>1&1}});
+ grp='Драйверы столбцов';const GC=CLS.map(c=>AND(c,pg)),RC=CLS.map(c=>AND(c,pr2));
+ grp='Светодиодный экран';
+ blk({ins:[...RWS,...GC,...RC],outs:[],kind:'led',w:660,h:660,inPos:i=>i<16?18+24*i:490+(i-16)*5,ev(){},
+  clk(){const I=this.ins;for(let r=0;r<16;r++)if(v[I[r]])for(let c=0;c<16;c++){if(v[I[16+c]])LL[(r*16+c)*2]=cycN;if(v[I[32+c]])LL[(r*16+c)*2+1]=cycN}}});
+ v=new Uint8Array(nn);
+})();
+const TT=Int8Array.from(ELS,e=>e.t),AA=Int32Array.from(ELS,e=>e.a),BB=Int32Array.from(ELS,e=>e.b),OO=Int32Array.from(ELS,e=>e.o);
+const nEl=ELS.length,nD=DFFS.length,nxt=new Uint8Array(nD);
+function evalAll(){for(let i=0;i<nEl;i++){const t=TT[i];if(t==0)v[OO[i]]=v[AA[i]]^1;else if(t==1)v[OO[i]]=v[AA[i]]&v[BB[i]];else if(t==2)v[OO[i]]=v[AA[i]]|v[BB[i]];else if(t==3)v[OO[i]]=v[AA[i]]^v[BB[i]];else blocks[AA[i]].ev()}}
+function setIn(){v[1]=1;v[tickN]=tickL;const t=performance.now();btnN.forEach((n,i)=>v[n]=btnUntil[i]>t?1:0)}
+function cycle(){setIn();evalAll();cycN++;if(v[blocks[1].ins[16]]){ramG=1;lastR=[num(blocks[1].ins.slice(0,8)),num(blocks[1].ins.slice(8,16))]}if(v[blocks[2].ins[10]]){vrG=1;lastV=[num(blocks[2].ins.slice(0,8)),num(blocks[2].ins.slice(8,10))]}
+ for(let i=0;i<nD;i++)nxt[i]=v[DFFS[i].d];
+ blocks.forEach(b=>b.clk&&b.clk());
+ for(let i=0;i<nD;i++)v[DFFS[i].q]=nxt[i];
+ if(v[ack])tickL=0}
+function programROM(){COLS=[...Array(16)].map(()=>[]);let n=0;ROMW.forEach((w,i)=>{for(let j=0;j<16;j++)if(w>>j&1){COLS[j].push(WLN[i]);n++}});if(romEl)romEl.tc=n}
+function reset(){LL.fill(-1e9);v.fill(0);RAM.fill(0);VR.fill(0);tickL=0;key=0;
+ // регистр ГСЧ = 0xA5 (последние 8 триггеров перед флагами)
+ const li=DFFS.findIndex(d=>d.g=='ГСЧ');for(let i=0;i<8;i++)v[DFFS[li+i].q]=0xA5>>i&1;
+ setIn();evalAll()}
+
+// ===== Раскладка схемы по уровням логики =====
+const lvl=new Int16Array(nn),PX=new Float32Array(nn),PY=new Float32Array(nn),cnt={},CS=34,RS=12;
+const put=(L,h=1)=>{const y=cnt[L]||0;cnt[L]=y+h;return y*RS};
+const TCN=[2,6,6,16],NM=['НЕ','И','ИЛИ','ИСКЛЮЧАЮЩЕЕ ИЛИ','блок памяти','D-триггер'];
+[...btnN,tickN].forEach(n=>{PX[n]=12;PY[n]=put(0)+4});
+DFFS.forEach(d=>{d.x=0;d.y=put(0);d.w=12;d.h=8;d.tc=20;d.t=5;PX[d.q]=12;PY[d.q]=d.y+4});
+ELS.forEach(e=>{
+ if(e.t<4){const L=1+Math.max(lvl[e.a],e.t?lvl[e.b]:0);lvl[e.o]=L;e.x=L*CS;e.y=put(L);e.w=14;e.h=8;e.tc=TCN[e.t];PX[e.o]=e.x+14;PY[e.o]=e.y+4}
+ else{const b=blocks[e.a],L=1+Math.max(...b.ins.map(n=>lvl[n])),bw=b.w||34,bh=b.h||66,nw=Math.ceil(bw/CS)-1;
+  let y0=0;for(let k=0;k<=nw;k++)y0=Math.max(y0,(cnt[L+k]||0)*RS);
+  if(b.inPos){const al=PY[b.ins[0]]-b.inPos(0);if(al>=y0)y0=al}
+  const un=Math.ceil((y0+bh)/RS)+1;for(let k=0;k<=nw;k++)cnt[L+k]=un;
+  e.x=L*CS;e.y=y0;e.w=bw;e.h=bh;e.tc=0;if(b.kind=='rom')romEl=e;
+  b.outs.forEach((n,i)=>{const o=b.outPos?b.outPos(i):[bw,4+i*((bh-8)/b.outs.length)];lvl[n]=L+nw;PX[n]=e.x+o[0];PY[n]=e.y+o[1]})}});
+// провода: от выхода источника к входу приёмника (ломаная под прямым углом)
+const WIRES=[],addW=(n,x,y,e,k)=>{if(n>1)WIRES.push({n,x,y,e,k})};
+ELS.forEach(e=>{if(e.t<4){if(e.t==0)addW(e.a,e.x,e.y+4,e,0);else{addW(e.a,e.x,e.y+2.6,e,0);addW(e.b,e.x,e.y+5.4,e,1)}}
+ else{const b=blocks[e.a];b.ins.forEach((n,i)=>addW(n,e.x,e.y+(b.inPos?b.inPos(i):3+i*((e.h-8)/b.ins.length)),e,i%4))}});
+DFFS.forEach(q=>addW(q.d,q.x,q.y+4,q,0));
+function route(p,q){const x1=PX[q.n],y1=PY[q.n];let xm=q.x-5-q.k*3;if(xm<x1+3)xm=x1+3;p.moveTo(x1,y1);p.lineTo(xm,y1);p.lineTo(xm,q.y);p.lineTo(q.x,q.y)}
+const GN=[...new Set(ELS.map(e=>e.g))],GB={},GD={},GS={};
+GN.forEach((g,i)=>{const h=i*37+10;GB[g]=`hsl(${h} 90% 62% / .85)`;GD[g]=`hsl(${h} 30% 28% / .8)`;GS[g]=`hsl(${h} 90% 70%)`});
+$('leg').innerHTML=GN.map(g=>`<span><i style="background:${GS[g]}"></i>${g}</span>`).join('');
+const WW=Math.max(...ELS.map(e=>e.x+(e.t==4?e.w:14)))+30,HH=Math.max(...Object.values(cnt))*RS+10;
+const sc=$('sch'),cx=sc.getContext('2d'),view={s:1,x:0,y:0},all=[...DFFS,...ELS];
+let hover=null,mp={x:0,y:0},sel=null,selIn=[],selOut=[];
+function fitView(){const m=80;view.s=Math.min(sc.clientWidth/(WW+m),sc.clientHeight/HH)*.96;view.x=(sc.clientWidth-(WW+m)*view.s)/2+m*view.s;view.y=(sc.clientHeight-HH*view.s)/2}
+
+// ===== Транзисторы: вид кристалла сверху =====
+// Красный — поликремний (затвор). Оранжевый — P-диффузия, зелёный — N-диффузия. Светлое пятно с буквой P/N — сам транзистор
+// (там, где красная полоса пересекает диффузию). Синий — металл, тёмные квадраты — контакты, красная/синяя шины — питание и земля.
+const K={nw:'#2d2b1e',pd:'#d29a3f',nd:'#3fae5a',ch:'rgba(255,255,255,.75)',vdd:'#d95b6a',gnd:'#4a86c8',
+ m1:['#3f7fd6','#8cc0ff'],m2:['#8a55c9','#d7a6ff'],pl:['#9c2f2a','#ff6b5e']};
+const CD={INV:['VO','GO'],NAND:['OVO','OMG'],NOR:['VMO','GOG'],FF:['VMOMVMOMVMO','GMOMGMOMGMO']};
+const NC={a:'#ffd35a',A:'#ffd35a',b:'#7fe0ff',B:'#7fe0ff',n:'#ff9dd0',x:'#a6ff8a',y:'#ffb36b',Y:'#ffffff',D:'#ffd35a',Q:'#ffffff'};
+const LATE=[];
+const DS=(x,y)=>{cx.save();cx.setLineDash([.45,.35]);cx.strokeStyle='#fff';cx.lineWidth=.25;cx.strokeRect(x,y,2,2);cx.restore()};
+const R=(x,y,w,h,c)=>{cx.fillStyle=c;cx.fillRect(x,y,w,h)};
+const CT=(x,y)=>{R(x,y,2,2,'#0a0e14');cx.strokeStyle='#e4edf5';cx.lineWidth=.25;cx.strokeRect(x,y,2,2)};
+const TX=(t,x,y,c,f=2.6)=>{cx.fillStyle=c;cx.font=`bold ${f}px system-ui`;cx.textAlign='center';cx.fillText(t,x,y);cx.textAlign='left'};
+const badge=(t,x,y,on)=>{cx.globalAlpha=on?1:.35;R(x-.5,y-3.4,3,3.4,NC[t]);cx.globalAlpha=1;cx.strokeStyle=NC[t];cx.lineWidth=.2;cx.strokeRect(x-.5,y-3.4,3,3.4);TX(t,x+1,y-.8,on?'#000':NC[t],2.4)};
+function cell(xo,ty,va,vb,vo,o={}){
+ const[P,N]=CD[ty],n=P.length-1,W=6*n+6,gx=i=>xo+1+i*6,px=i=>gx(i)+4,os=[],ff=ty=='FF',ins=[va,vb];
+ R(xo,1,W,13.5,K.nw);R(xo+1,4.5,W-2,6,K.pd);R(xo+1,21,W-2,6,K.nd);
+ for(let i=0;i<n;i++){const c=K.pl[ins[i&&1]?1:0],x=px(i),pad=o.pad&&!i,up=!pad&&(!ff||!i);
+  R(x,up?-2:2,2,up?30:26,c);if(pad)R(x-1,15,4,4,c)}
+ const m1=K.m1[vo?1:0];
+ for(let i=0;i<=n;i++){const x=gx(i)+1;
+  if(P[i]=='V'){R(x,3,2,5.5,K.vdd);CT(x,6.5)}
+  if(P[i]=='O'){R(x,6.5,2,6.7,m1);CT(x,6.5);os.push(x)}
+  if(N[i]=='G'){R(x,23,2,6,K.gnd);CT(x,23)}
+  if(N[i]=='O'){R(x,12,2,13,m1);CT(x,23);os.push(x)}
+  if(P[i]=='M')DS(x,6.5);if(N[i]=='M')DS(x,23)}
+ const o0=Math.min(...os),o1=Math.max(...os);
+ R(o0,11.6,o1-o0+2,1.6,m1);
+ for(let i=0;i<n;i++){R(px(i),4.5,2,6,K.ch);R(px(i),21,2,6,K.ch);TX('P',px(i)+1,8.4,'#000');TX('N',px(i)+1,24.9,'#000')}
+ LATE.push(()=>{
+  if(o.link){R(o1,11.6,o.link-o1+2,1.6,m1);R(o.link,11.6,2,5.4,m1);CT(o.link,16)}
+  for(let i=0;i<(ff?1:n);i++)if(!(o.pad&&!i))badge(ff?'D':i?o.b:o.a,px(i),-2,ins[i]);
+  if(o.ext){cx.globalAlpha=.85;R(o1+.5,-2,1,14.4,K.m2[vo?1:0]);cx.globalAlpha=1;R(o1+.2,11.8,1.6,1.6,'#0a0e14');badge(ff?'Q':o.y,o1,-2,vo)}})}
+const geo=(e,W_)=>{const k=Math.min(.82*e.w/W_,.7*e.h/41);return{k,ox:e.x+(e.w-W_*k)/2,oy:e.y+(e.h-41*k)/2+9*k}};
+function place(e,W_,fn){
+ const g=geo(e,W_),k=g.k;
+ cx.save();cx.translate(g.ox,g.oy);cx.scale(k,k);
+ fn();R(0,0,W_,3,K.vdd);R(0,29,W_,3,K.gnd);TX('+',2,2.5,'#fff');TX('−',2,31.5,'#fff');
+ LATE.splice(0).forEach(f=>f());cx.restore()}
+// провода снаружи доводятся до меток A, B, Y внутри кристалла
+function leads(e){
+ const t=e.t,W_=t==5?66:t==0?12:t==3?81:33,g=geo(e,W_),X=l=>g.ox+l*g.k,Yb=g.oy-5.4*g.k,lw=Math.min(.08,3/view.s);
+ const S=(pts,on,dots=[])=>{cx.strokeStyle=cx.fillStyle=on?'#ffd35a':'#6f9fcf';cx.lineWidth=lw;cx.lineJoin='round';cx.beginPath();
+  pts.forEach(([x,y],i)=>i?cx.lineTo(x,y):cx.moveTo(x,y));cx.stroke();dots.forEach(([x,y])=>{cx.beginPath();cx.arc(x,y,lw*1.7,0,7);cx.fill()})};
+ const inp=(pin,on,lx,xm,yb)=>{const xs=lx.map(X);S([pin,[xm,pin[1]],[xm,yb],[Math.max(...xs),yb]],on);xs.forEach(x=>S([[x,yb],[x,Yb]],on,xs.length>1?[[x,yb]]:[]))};
+ const yA=Yb-.55,yB=Yb-1.1;
+ if(t==5){inp([e.x,e.y+4],v[e.d],[6],e.x+.35,yA);var lo=63,po=[e.x+12,e.y+4],on=v[e.q]}
+ else{const two=t>0,a=v[e.a];
+  inp([e.x,e.y+(two?2.6:4)],a,t==3?[6,27]:[6],e.x+.35,yA);
+  if(two)inp([e.x,e.y+5.4],v[e.b],t==3?[12,48]:[12],e.x+.75,yB);
+  var lo=t==0?9:t==3?78:30,po=[e.x+14,e.y+4],on=v[e.o]}
+ const xr=e.x+e.w-.4;S([[X(lo),Yb],[X(lo),yA],[xr,yA],[xr,po[1]],po],on)}
+function tdraw(e){
+ const t=e.t,a=v[e.a],b=v[e.b],o=v[e.o];
+ if(t==0)return place(e,12,()=>cell(0,'INV',a,0,o,{a:'A',y:'Y',ext:1}));
+ if(t<3)return place(e,33,()=>{const n=t==1?!(a&b)|0:!(a|b)|0;
+  cell(0,t==1?'NAND':'NOR',a,b,n,{a:'A',b:'B',link:26});cell(21,'INV',n,0,o,{pad:1,y:'Y',ext:1})});
+ place(e,81,()=>{const n=!(a&b)|0,x=!(a&n)|0,y=!(b&n)|0;
+  cell(0,'NAND',a,b,n,{a:'a',b:'b',y:'n',ext:1});cell(21,'NAND',a,n,x,{a:'a',b:'n',y:'x',ext:1});
+  cell(42,'NAND',b,n,y,{a:'b',b:'n',y:'y',ext:1});cell(63,'NAND',x,y,o,{a:'x',b:'y',y:'Y',ext:1})})}
+function tdff(q){const c=v[q.q];place(q,66,()=>cell(0,'FF',c,c,c,{y:'Q',ext:1}))}
+
+// ===== Отрисовка схемы =====
+// ===== Рисование крупных блоков: ПЗУ-матрица и светодиодный экран =====
+// ===== Реалистичные компоненты =====
+// 5-мм светодиод сверху: тёмный ободок, линза с бликом, внутри свет
+function domeLed(c,x,y,r,ch,br,flat){
+ const rgb=ch?[255,77,77]:[59,255,106],lit=br>.05,a=Math.min(1,br);
+ c.fillStyle='#161f2a';c.beginPath();c.arc(x,y,r*1.08,0,7);c.fill();
+ if(flat){c.fillStyle=lit?`rgba(${rgb},${.3+.7*a})`:(ch?'#4a2327':'#17402a');c.beginPath();c.arc(x,y,r*.92,0,7);c.fill();return}
+ const g=c.createRadialGradient(x-r*.3,y-r*.35,r*.08,x,y,r*.95);
+ if(lit){g.addColorStop(0,`rgba(255,255,255,${.35+.5*a})`);g.addColorStop(.3,`rgba(${rgb},${.55+.45*a})`);g.addColorStop(1,`rgba(${rgb.map(q=>q*.4|0)},1)`)}
+ else{g.addColorStop(0,ch?'#c46a6e':'#5fcf8c');g.addColorStop(.25,ch?'#8a3a3f':'#2f8f57');g.addColorStop(1,ch?'#3a181b':'#0f3a22')}
+ c.fillStyle=g;c.beginPath();c.arc(x,y,r*.92,0,7);c.fill();
+ c.fillStyle=`rgba(255,255,255,${lit?.7:.4})`;c.beginPath();c.arc(x-r*.32,y-r*.38,r*.2,0,7);c.fill();
+ c.strokeStyle='#161f2a';c.lineWidth=r*.2;c.beginPath();c.moveTo(x-r*.62,y+r*.8);c.lineTo(x+r*.62,y+r*.8);c.stroke()}
+// резистор вертикально: бежевое тело, цветные кольца 330 Ом (оранжевый, оранжевый, коричневый, золотой)
+function resistorV(x,y,lw){
+ cx.strokeStyle='#c5ccd4';cx.lineWidth=lw*1.2;cx.beginPath();cx.moveTo(x,y);cx.lineTo(x,y+10);cx.stroke();
+ cx.fillStyle='#d9c28a';cx.beginPath();cx.moveTo(x-1.1,y+2.2);cx.lineTo(x-2.3,y+3.3);cx.lineTo(x-2.3,y+6.7);cx.lineTo(x-1.1,y+7.8);cx.lineTo(x+1.1,y+7.8);cx.lineTo(x+2.3,y+6.7);cx.lineTo(x+2.3,y+3.3);cx.lineTo(x+1.1,y+2.2);cx.closePath();cx.fill();
+ [[3.4,'#ff8c1a'],[4.5,'#ff8c1a'],[5.6,'#7a3b12'],[6.8,'#d4af37']].forEach(([d,col])=>{cx.fillStyle=col;cx.fillRect(x-2.2,y+d-.35,4.4,.7)})}
+function contact(x,y){cx.fillStyle='#05080c';cx.fillRect(x-1,y-1,2,2);cx.strokeStyle='#cfd8e0';cx.lineWidth=.25;cx.strokeRect(x-1,y-1,2,2)}
+
+// ПЗУ: вид кристалла. Вертикально — металл (линия разряда) и шина земли, горизонтально — поликремний (слово).
+// Где в слове единица, под поликремнем лежит зелёная область: получается транзистор.
+function drawRom(e,s,b){
+ const bx=j=>24+(15-j)*20,wy=a=>4+12*a,yo=j=>3110+(15-j)*8,lw=Math.max(.3,1/s),xe=24+15*20+16,n=ROMW.length;
+ cx.save();cx.translate(e.x,e.y);cx.lineWidth=lw;
+ cx.fillStyle='#0b141d';cx.fillRect(0,0,e.w,e.h);
+ cx.fillStyle='#e4edf5';cx.font='9px system-ui';cx.fillText('ПЗУ 256×16 · матрица транзисторов (зелёное пятно под красной полосой = транзистор, 1)',24,-30);
+ const detail=s>2.2,vy0=Math.max(0,Math.floor((-view.y/s-e.y-10)/12)),vy1=Math.min(255,Math.ceil(((sc.clientHeight-view.y)/s-e.y)/12));
+ // поля команды над столбцами
+ {const F=[[15,12,'операция','#7fe0ff'],[11,9,'регистр','#ffb36b'],[8,8,'число?','#c9a6ff'],[7,0,'число / адрес','#a6ff8a']];
+  F.forEach(([hi,lo,nm,col])=>{const x0=bx(hi)-8,x1=bx(lo)+8;cx.fillStyle=col;cx.fillRect(x0,-16,x1-x0,1.4);cx.font='bold 7px system-ui';cx.textAlign='center';cx.fillText(nm,(x0+x1)/2,-19);
+   for(let j=lo;j<=hi;j++){cx.font='6px system-ui';cx.fillText(String(j),bx(j),-6)}});cx.textAlign='left'}
+ // подсказка рядом с выбранным словом
+ {const pcv=num(pcQ),py=Math.max(20,Math.min(2900,Math.ceil((-view.y/s-e.y)+24/Math.max(s,.5)))),px=xe+48,w=ROMW[pcv]|0,bin=[...Array(16)].map((_,i)=>w>>(15-i)&1).join('').replace(/(.{4})/g,'$1 ').trim(),cnt1=(()=>{let q=0,z=w;while(z){q+=z&1;z>>=1}return q})();
+  cx.fillStyle='rgba(20,38,58,.94)';cx.fillRect(px-6,py-14,210,252);cx.strokeStyle='#ffd35a';cx.lineWidth=lw;cx.strokeRect(px-6,py-14,210,252);
+  cx.fillStyle='#ffd35a';cx.font='bold 8px system-ui';cx.fillText('КАК ЧИТАТЬ ПЗУ',px,py-3);
+  cx.font='7px system-ui';cx.fillStyle='#e4edf5';
+  ['• Горизонтальная красная полоса —','  одно слово (одна команда).','• Вертикальная линия — один бит.','• Зелёное пятно под красной полосой —','  транзистор: в этом бите стоит 1.','• Нет пятна — транзистора нет: бит 0.','','Чтение: адрес → дешифратор включает','одну полосу → её транзисторы тянут','свои линии к земле → вентили НЕ','переворачивают → команда готова.'].forEach((t,i)=>cx.fillText(t,px,py+9+i*9.2));
+  cx.fillStyle='#ffd35a';cx.font='bold 7px system-ui';cx.fillText(`Сейчас читается слово ${hx(pcv)}:`,px,py+118);
+  cx.font='7px ui-monospace,monospace';cx.fillStyle='#e4edf5';cx.fillText(bin,px,py+130);
+  cx.font='7px system-ui';cx.fillStyle='#a6ff8a';cx.fillText(`команда: ${pcv<ROMW.length?dis(w):'—'}`,px,py+142);
+  cx.fillStyle='#8aa3b8';cx.fillText(`транзисторов в слове: ${cnt1}`,px,py+154);
+  cx.fillText(`(слов в программе: ${n}, всего 256)`,px,py+166);
+  cx.fillStyle='#ffb36b';cx.fillText('Стрелка слева у жёлтой строки',px,py+184);cx.fillText('показывает выбранное слово.',px,py+194)}
+ // легенда обозначений
+ if(s>.7){const L=[['rect','#7a2724','Красная полоса — ЗАТВОР: линия слова (поликремний). Когда слово выбрано, она светлеет.'],
+  ['rect','#4a86c8','Тёмно-синяя линия — ЗЕМЛЯ (GND, 0 В).'],
+  ['rect','#4cc2ff','Голубая линия — ЛИНИЯ БИТА, низкий уровень (≈0 В): её тянет к земле открытый транзистор.'],
+  ['rect','#ff9d9d','Розовая линия — ЛИНИЯ БИТА, высокий уровень (+5 В): транзистора нет, держит резистор.'],
+  ['tr','','Зелёный прямоугольник — ТРАНЗИСТОР (n-канал). Светлая середина — затвор над каналом. Он = бит 1.'],
+  ['ct','','Чёрный квадрат с рамкой — КОНТАКТ: здесь провод ПРИПАЯН к транзистору (сверху исток → земля, снизу сток → линия бита).'],
+  ['cr','','Красная полоса пересекает синюю линию БЕЗ чёрного квадрата — это НЕ соединение, провода лежат в разных слоях.'],
+  ['rs','','Зигзаг внизу — РЕЗИСТОР, подтягивает линию бита к +5 В (красная шина внизу).']];
+  cx.fillStyle='rgba(20,38,58,.94)';cx.fillRect(18,-160,590,L.length*13+30);cx.strokeStyle='#4a86c8';cx.lineWidth=lw;cx.strokeRect(18,-160,590,L.length*13+30);
+  cx.font='bold 7px system-ui';cx.fillStyle='#ffd35a';cx.fillText('ОБОЗНАЧЕНИЯ',24,-150);
+  L.forEach(([k,c,t],i)=>{const y=-138+i*13;
+   if(k=='rect'){cx.fillStyle=c;cx.fillRect(24,y-4,16,5)}
+   else if(k=='tr'){cx.fillStyle='#3fae5a';cx.fillRect(29,y-5,6,8);cx.fillStyle='rgba(255,255,255,.55)';cx.fillRect(28,y-2.5,8,2.5)}
+   else if(k=='ct'){contact(32,y-1.5);cx.fillStyle='#05080c';cx.fillRect(31,y-2.5,2,2)}
+   else if(k=='cr'){cx.fillStyle='#7a2724';cx.fillRect(24,y-2.5,16,3);cx.fillStyle='#4a86c8';cx.fillRect(31,y-6,2.4,10);cx.fillStyle='#7a2724';cx.fillRect(24,y-2.5,5,3);cx.fillRect(35,y-2.5,5,3)}
+   else{cx.strokeStyle='#e4edf5';cx.lineWidth=lw;cx.beginPath();cx.moveTo(24,y-1);[26,28,30,32,34,36,38].forEach((x,j)=>cx.lineTo(x,y-1+(j%2?3:-3)));cx.lineTo(40,y-1);cx.stroke()}
+   cx.font='6.5px system-ui';cx.fillStyle='#e4edf5';cx.fillText(t,48,y+1)})}
+ // питание и подтяжка (внизу)
+ cx.strokeStyle='#ff6b6b';cx.lineWidth=lw*1.6;cx.beginPath();cx.moveTo(bx(15)-6,3076);cx.lineTo(bx(0)+6,3076);cx.stroke();
+ cx.fillStyle='#e4edf5';cx.font='6px system-ui';cx.fillText('+5 В',2,3079);
+ // шины земли
+ cx.fillStyle='#4a86c8';for(let j=0;j<16;j++)cx.fillRect(bx(j)-11.2,-3.6,2.4,3073.6);
+ cx.fillRect(2,-3.6,bx(0)-8.8-2,2.4);cx.fillStyle='#e4edf5';cx.font='bold 5px system-ui';cx.textAlign='right';cx.fillText('GND (земля, 0 В) ▸',0,-1.2);cx.textAlign='left';
+ // линии разрядов
+ for(let j=0;j<16;j++){const x=bx(j),hi=v[BLN[j]];
+  cx.fillStyle=hi?'#ff9d9d':'#4cc2ff';cx.fillRect(x-1.5,0,3,yo(j));cx.fillRect(x-1.5,yo(j)-1.5,e.w-x+1.5,3);
+  resistorV(x,3076,lw);cx.fillStyle='#e4edf5';cx.font='6px system-ui';cx.fillText('бит '+j,x-8,3104)}
+ // зелёные области (диффузия) для транзисторов
+ if(detail){cx.fillStyle='#3fae5a';for(let a=vy0;a<=vy1&&a<n;a++){const w=ROMW[a];for(let j=0;j<16;j++)if(w>>j&1)cx.fillRect(bx(j)-7.5,wy(a)-5,5,10)}}
+ // слова — поликремний
+ for(let a=vy0;a<=vy1;a++){const sel=v[WLN[a]],y=wy(a);
+  if(detail){cx.fillStyle=sel?'#ff6b5e':'#7a2724';cx.fillRect(0,y-1.6,xe,3.2)}
+  else{cx.fillStyle=sel?'#ffd35a':'#2a4258';cx.fillRect(0,y-.6,xe,1.2)}}
+ // стрелка у выбранного слова
+ {const pcv=num(pcQ);if(pcv>=vy0&&pcv<=vy1){cx.fillStyle='#ffd35a';cx.beginPath();cx.moveTo(-14,wy(pcv));cx.lineTo(-6,wy(pcv)-4);cx.lineTo(-6,wy(pcv)+4);cx.closePath();cx.fill();cx.font='bold 6px system-ui';cx.textAlign='right';cx.fillText('выбрано',-16,wy(pcv)+2);cx.textAlign='left'}}
+ // транзисторы поверх
+ for(let a=vy0;a<=vy1&&a<n;a++){const w=ROMW[a],sel=v[WLN[a]],y=wy(a);
+  for(let j=0;j<16;j++){if(!(w>>j&1))continue;const x=bx(j),xd=x-5;
+   if(detail){
+    cx.fillStyle=sel?'rgba(220,255,230,.95)':'rgba(255,255,255,.55)';cx.fillRect(xd-2.5,y-1.6,5,3.2);
+    cx.fillStyle='#4a86c8';cx.fillRect(x-10,y-5.2,xd-(x-10),1.2);cx.fillStyle=v[BLN[j]]?'#ff9d9d':'#4cc2ff';cx.fillRect(xd,y+4,x-xd,1.2);
+    contact(xd,y-4.5);contact(xd,y+4.5);
+    if(s>9){cx.font='bold 2.6px system-ui';cx.fillStyle='#7dffa0';cx.fillText('исток',xd+3,y-6.2);cx.fillStyle='#ffd35a';cx.fillText('сток',xd+3,y+8.6);cx.fillStyle='#fff';cx.fillText('затвор',xd+3,y+.9)}}
+   else{cx.fillStyle=sel?'#3bff6a':'#9fb7cc';cx.fillRect(x-12,y-3,9,6)}}}
+ if(s>.9){cx.font='6px ui-monospace,monospace';for(let a=vy0;a<=vy1;a++){if(s<3&&a%8)continue;cx.fillStyle=v[WLN[a]]?'#ffd35a':'#8aa3b8';cx.fillText('слово '+a.toString(16).toUpperCase().padStart(2,'0'),xe+4,wy(a)+2.5)}}
+ cx.restore()}
+
+// Светодиодный экран: вид кристалла для транзисторов, настоящие линзы светодиодов и резисторы
+function drawLed(e,s,b){
+ const I=b.ins,lw=Math.max(.15,.8/s),PT=24,yr=r=>26+PT*r,xc=c=>56+PT*c,xg=c=>xc(c)-6,xr=c=>xc(c)+6,XE=xc(15)+16;
+ const DIM='#35577a',YL='#ffd35a',RED='#ff6b6b',flat=s<1.6;
+ cx.save();cx.translate(e.x,e.y);cx.lineWidth=lw;
+ cx.fillStyle='#0b141d';cx.fillRect(0,0,e.w,e.h);
+ cx.fillStyle='#e4edf5';cx.font='bold 8px system-ui';cx.fillText('СВЕТОДИОДНЫЙ ЭКРАН 16×16',110,9);
+ cx.font='6px system-ui';cx.fillStyle='#8aa3b8';cx.fillText('P-транзисторы строк',2,17);cx.fillText('N-транзисторы столбцов',40,484);
+ const ln=(c,w,pts)=>{cx.strokeStyle=c;cx.lineWidth=lw*w;cx.beginPath();pts.forEach(([x,y],i)=>i?cx.lineTo(x,y):cx.moveTo(x,y));cx.stroke()};
+ cx.font='6px ui-monospace,monospace';
+ for(let c=0;c<16;c++){cx.fillStyle=v[I[16+c]]||v[I[32+c]]?YL:'#6a8099';cx.fillText(String(c),xc(c)-(c>9?3:1.5),20)}
+ for(let r=0;r<16;r++){cx.fillStyle=v[I[r]]?YL:'#6a8099';cx.fillText(String(r),38,yr(r)-3)}
+ ln(RED,2,[[6,18],[6,yr(15)+2]]);
+ // P-транзисторы строк (кристалл): оранжевая область, вертикальный затвор, белое пятно канала
+ for(let r=0;r<16;r++){const on=v[I[r]],y=yr(r);
+  ln(on?YL:DIM,on?1.6:1,[[0,y-8],[21,y-8],[21,y-7.4]]);
+  ln(RED,1.8,[[6,y],[15,y]]);cx.fillStyle=RED;cx.fillRect(5.2,y-.8,1.6,1.6);
+  cx.fillStyle='#2d2b1e';cx.fillRect(12,y-6,18,12);cx.fillStyle='#d29a3f';cx.fillRect(13,y-3.6,16,7.2);
+  cx.fillStyle=on?'#ff6b5e':'#9c2f2a';cx.fillRect(19.5,y-7.4,3,13.6);
+  cx.fillStyle=on?'rgba(255,240,170,.95)':'rgba(255,255,255,.6)';cx.fillRect(19.5,y-3.6,3,7.2);
+  contact(15.5,y);contact(26.5,y);
+  if(s>6){cx.fillStyle='#cfd8e0';cx.font='2.4px system-ui';cx.fillText('исток +5В',8,y+9);cx.fillText('сток→строка',24.5,y+9);cx.fillText('затвор',24.8,y-9.4);cx.fillStyle='#ffb36b';cx.font='bold 2.5px system-ui';cx.fillText('P-транзистор',7,y-9.4)}
+  ln(on?YL:'#4a6178',on?2.2:1,[[26.5,y],[XE,y]])}
+ const yB=yr(15)+14;
+ for(let c=0;c<16;c++)for(let ch=0;ch<2;ch++){
+  const x=ch?xr(c):xg(c),k=ch*16+c,gon=v[I[16+k]],y0=ch?458:432,rail=ch?468:442,yg=490+k*5,col=ch?'#ff4d4d':'#3bff6a',dl=ch?'#6b3a3a':'#2f5a46';
+  ln(gon?col:dl,gon?2:1,[[x,yr(0)],[x,yB]]);
+  resistorV(x,yB,lw);
+  ln(gon?col:dl,gon?2:1,[[x,yB+10],[x,y0-5.5]]);
+  // N-транзистор: зелёная вертикальная область, горизонтальный затвор
+  cx.fillStyle='#3fae5a';cx.fillRect(x-2.6,y0-7,5.2,14);
+  cx.fillStyle=gon?'#ff6b5e':'#9c2f2a';cx.fillRect(x-6,y0-1.5,9,3);
+  cx.fillStyle=gon?'rgba(220,255,230,.95)':'rgba(255,255,255,.6)';cx.fillRect(x-2.6,y0-1.5,5.2,3);
+  contact(x,y0-5.5);contact(x,y0+5.5);
+  if(c===0&&s>9){cx.fillStyle='#cfd8e0';cx.font='2.4px system-ui';cx.fillText('затвор',x-14.5,y0-2.6);cx.fillText('сток (к резистору)',x+3.6,y0-5.4);cx.fillText('исток → земля',x+3.6,y0+8.2);cx.fillStyle='#7fe0a0';cx.font='bold 2.6px system-ui';cx.fillText('N-транзистор',x-14.5,y0-8.6)}
+  ln('#4a86c8',1.2,[[x,y0+5.5],[x,rail]]);
+  cx.fillStyle='#4a86c8';cx.fillRect(x-.7,rail-.7,1.4,1.4);
+  ln(gon?YL:DIM,gon?1.6:1,[[0,yg],[x-4,yg],[x-4,y0],[x-5.5,y0]])}
+ ln('#4a86c8',2,[[36,442],[XE,442]]);ln('#4a86c8',2,[[36,468],[XE,468]]);ln('#4a86c8',2,[[30,442],[30,468]]);
+ ln('#4a86c8',1.4,[[30,468],[30,472]]);ln('#4a86c8',1.4,[[26,472],[34,472]]);ln('#4a86c8',1.4,[[28,474],[32,474]]);
+ // светодиоды
+ const vx0=-e.x-view.x/s,vx1=(sc.clientWidth-view.x)/s-e.x,vy0=-e.y-view.y/s,vy1=(sc.clientHeight-view.y)/s-e.y;
+ for(let r=0;r<16;r++){const y=yr(r);if(y<vy0-14||y>vy1+14)continue;const act=v[I[r]];
+  for(let c=0;c<16;c++){if(xc(c)<vx0-20||xc(c)>vx1+20)continue;
+   for(let ch=0;ch<2;ch++){const idx=(r*16+c)*2+ch,x=ch?xr(c):xg(c),now=act&&v[I[16+ch*16+c]],br=Math.min(1,now?1:Math.exp(-(cycN-LL[idx])/500)),lit=br>.05;
+    if(lit&&s>.5){const rgb=ch?'255,77,77':'59,255,106',g=cx.createRadialGradient(x,y,1,x,y,13);g.addColorStop(0,`rgba(${rgb},${.55*br})`);g.addColorStop(1,`rgba(${rgb},0)`);cx.fillStyle=g;cx.beginPath();cx.arc(x,y,13,0,7);cx.fill()}
+    domeLed(cx,x,y,5,ch,br,flat);
+    if(s>3.5){cx.font='bold 3.6px system-ui';cx.textAlign='center';cx.fillStyle='#ff9d9d';cx.fillText('+',x,y-6.6);cx.fillStyle='#9fd0ff';cx.fillText('−',x,y+9.4);cx.textAlign='left'}}}}
+ // пояснение справа
+ const lx=XE+22;cx.font='bold 7px system-ui';cx.fillStyle='#e4edf5';cx.fillText('Как читать',lx,40);
+ cx.font='6.5px system-ui';cx.fillStyle='#8aa3b8';
+ ['Каждая клетка — два светодиода:','зелёный и красный.','','Ток идёт от строки (+5 В) через','светодиод в столбец.','','Строка получает +5 В, когда её','P-транзистор открыт (жёлтая линия).','','Столбец уходит на землю через','резистор и N-транзистор.','','Светится только клетка на','пересечении жёлтой строки и','жёлтого столбца.','','Развёртка перебирает клетки так','быстро, что видны все сразу.','','Транзисторы нарисованы как на','кристалле: красная полоса —','затвор, белое пятно — канал.'].forEach((t,i)=>cx.fillText(t,lx,56+i*10));
+ domeLed(cx,lx+5,290,5,0,0,false);cx.fillStyle='#e4edf5';cx.fillText('зелёный — бит 0 видеопамяти',lx+14,292.5);
+ domeLed(cx,lx+5,306,5,1,0,false);cx.fillText('красный — бит 1 видеопамяти',lx+14,308.5);
+ cx.font='bold 7px system-ui';cx.fillStyle='#e4edf5';cx.fillText('Анод и катод светодиода',lx,338);
+ const ax=lx+34,ay=372;domeLed(cx,ax,ay,14,0,0,false);
+ cx.strokeStyle='#c5ccd4';cx.lineWidth=1.4;cx.beginPath();cx.moveTo(ax-5,ay+14);cx.lineTo(ax-5,ay+34);cx.moveTo(ax+5,ay+14);cx.lineTo(ax+5,ay+25);cx.stroke();
+ cx.font='bold 6.5px system-ui';cx.fillStyle='#ff9d9d';cx.fillText('+ анод',ax-42,ay+31);cx.fillStyle='#9fd0ff';cx.fillText('− катод',ax+10,ay+25);
+ cx.font='6px system-ui';cx.fillStyle='#8aa3b8';
+ ['Анод (+) — длинная ножка: сюда','приходит +5 В от строки.','','Катод (−) — короткая ножка и','плоский срез на линзе: отсюда','ток уходит в столбец.','','На схеме: «+» сверху клетки,','«−» снизу.'].forEach((t,i)=>cx.fillText(t,lx,ay+48+i*9));
+ cx.restore()}
+
+// Кнопки: настоящие тактовые переключатели 6×6 мм сверху (корпус, четыре ножки, круглый колпачок)
+const BTNS=[['▲','вверх',1],['▼','вниз',2],['◀','влево',3],['▶','вправо',4]];
+function drawInputs(s,lw){
+ const t=performance.now();cx.save();
+ cx.fillStyle='#e4edf5';cx.font='bold 7px system-ui';cx.textAlign='left';cx.fillText('Кнопки управления',-74,-5);
+ BTNS.forEach(([g,nm],i)=>{const n=btnN[i],y=PY[n],on=btnUntil[i]>t,bx=-30,by=y-5.2;
+  cx.strokeStyle=on?'#ffd35a':'#6f9fcf';cx.lineWidth=lw*1.6;cx.beginPath();cx.moveTo(bx+11,y);cx.lineTo(PX[n],y);cx.stroke();
+  cx.fillStyle='#c8ced6';[[bx-1.4,by+1.2],[bx-1.4,by+7],[bx+11,by+1.2],[bx+11,by+7]].forEach(([px,py])=>cx.fillRect(px,py,1.8,1.3));
+  cx.fillStyle='#262b32';cx.fillRect(bx,by,11,10.4);cx.fillStyle='rgba(255,255,255,.12)';cx.fillRect(bx,by,11,1.2);
+  cx.fillStyle='#14171c';[[bx+1.3,by+1.3],[bx+9.7,by+1.3],[bx+1.3,by+9.1],[bx+9.7,by+9.1]].forEach(([px,py])=>{cx.beginPath();cx.arc(px,py,.55,0,7);cx.fill()});
+  const ccx=bx+5.5,ccy=by+5.2+(on?.45:0);
+  if(on){cx.fillStyle='rgba(255,211,90,.35)';cx.beginPath();cx.arc(ccx,ccy,6.4,0,7);cx.fill()}
+  const gr=cx.createRadialGradient(ccx-1.2,ccy-1.4,.4,ccx,ccy,4);gr.addColorStop(0,on?'#8a7a3a':'#6a7482');gr.addColorStop(1,on?'#3a3112':'#171b21');
+  cx.fillStyle=gr;cx.beginPath();cx.arc(ccx,ccy,3.9,0,7);cx.fill();cx.strokeStyle=on?'#ffd35a':'#0a0d11';cx.lineWidth=lw*1.2;cx.stroke();
+  cx.fillStyle=on?'#ffd35a':'#e4edf5';cx.font='bold 5.5px system-ui';cx.textAlign='center';cx.fillText(g,ccx,ccy+2);
+  cx.fillStyle='#8aa3b8';cx.font='6px system-ui';cx.textAlign='right';cx.fillText(nm,bx-4,y+2);cx.textAlign='left'});
+ // таймер 555: корпус DIP-8 с выемкой и ножками
+ const ty=PY[tickN],tx=-30,tb=ty-5.2,blink=tickG>.3;
+ cx.strokeStyle=tickL?'#ffd35a':'#6f9fcf';cx.lineWidth=lw*1.6;cx.beginPath();cx.moveTo(tx+11,ty);cx.lineTo(PX[tickN],ty);cx.stroke();
+ cx.fillStyle='#c8ced6';for(let k=0;k<4;k++){cx.fillRect(tx-1.2,tb+.8+k*2.5,1.4,1.2);cx.fillRect(tx+10.8,tb+.8+k*2.5,1.4,1.2)}
+ cx.fillStyle='#1a1c20';cx.fillRect(tx,tb,11,10.4);cx.fillStyle='#0a0b0d';cx.beginPath();cx.arc(tx+5.5,tb,1.2,0,3.15);cx.fill();
+ cx.fillStyle=blink?'#ffd35a':'#6a7482';cx.font='bold 4.6px system-ui';cx.textAlign='center';cx.fillText('NE555',tx+5.5,tb+6.4);
+ cx.fillStyle=blink?'#ffd35a':'#2a3340';cx.beginPath();cx.arc(tx+9,tb+2.2,.8,0,7);cx.fill();
+ cx.fillStyle='#8aa3b8';cx.font='6px system-ui';cx.textAlign='right';cx.fillText('таймер 100 Гц',tx-4,ty+2);
+ cx.textAlign='left';cx.restore()}
+function inputHit(wx,wy){if(wx<-62||wx>-17)return 0;for(let i=0;i<4;i++)if(Math.abs(wy-PY[btnN[i]])<=5.5)return i+1;return 0}
+function hoverText(h){
+ if(h.t==4){const b=blocks[h.a],lx=(mp.x-view.x)/view.s-h.x,ly=(mp.y-view.y)/view.s-h.y;
+  if(b.kind=='led'){const c=Math.round((lx-56)/24),r=Math.round((ly-26)/24);
+   if(c>=0&&c<16&&r>=0&&r<16&&Math.abs(ly-(26+24*r))<9){const ch=lx>56+24*c?1:0,on=cycN-LL[(r*16+c)*2+ch]<500;return `Светодиод ${ch?'красный':'зелёный'}: анод (+) ← строка ${r}, катод (−) → столбец ${c} — ${on?'горит':'не горит'}`}
+   return 'Светодиодный экран 16×16: строки — P-транзисторы, столбцы — N-транзисторы'}
+  if(b.kind=='rom'){const a=Math.round((ly-4)/12);if(a>=0&&a<256){const w=ROMW[a]|0;return `ПЗУ: адрес 0x${hx(a)} = 0x${hx(w,4)}${a<ROMW.length?' ('+dis(w)+')':''}`}return 'ПЗУ — матрица транзисторов'}
+  return `${h.g} · блок памяти`}
+ return `${h.g} · ${NM[h.t]}${h.tc?` · ${h.tc} транзисторов`:''} = ${val(h)}`}
+function goTo(wx,wy,z){view.s=z;view.x=sc.clientWidth/2-wx*z;view.y=sc.clientHeight/2-wy*z}
+function drawBlk(e,s){
+ const b=blocks[e.a],X=e.x*s+view.x,Y=e.y*s+view.y;
+ cx.fillStyle=GD[e.g];cx.fillRect(e.x,e.y,e.w,e.h);
+ if(X>sc.clientWidth||Y>sc.clientHeight||X+e.w*s<0||Y+e.h*s<0)return;
+ if(b.kind=='rom')drawRom(e,s,b);else if(b.kind=='led')drawLed(e,s,b);
+ else{cx.fillStyle='#e4edf5';cx.font='5px system-ui';cx.fillText(e.g,e.x+2,e.y+8)}}
+
+function drawSch(){
+ const w=sc.clientWidth,h=sc.clientHeight,d=devicePixelRatio||1,s=view.s;
+ if(sc.width!==Math.round(w*d)||sc.height!==Math.round(h*d)){sc.width=Math.round(w*d);sc.height=Math.round(h*d)}
+ cx.setTransform(d,0,0,d,0,0);cx.clearRect(0,0,w,h);
+ cx.setTransform(d*s,0,0,d*s,d*view.x,d*view.y);
+ const vis=e=>{const X=e.x*s+view.x,Y=e.y*s+view.y;return X>-90&&X<w+30&&Y>-90&&Y<h+30};
+ const on=new Path2D(),off=new Path2D();
+ for(const q of WIRES)route(v[q.n]?on:off,q);
+ const lw=Math.min(1.2,Math.max(.04,1.3/s));cx.lineWidth=lw;cx.lineJoin='round';
+ cx.strokeStyle='#35577a';cx.stroke(off);cx.strokeStyle='#ffd35a';cx.stroke(on);
+ if(sel){const a=new Path2D(),b=new Path2D();selIn.forEach(q=>route(a,q));selOut.forEach(q=>route(b,q));
+  cx.lineWidth=lw*2.2;cx.strokeStyle='#4cc2ff';cx.stroke(a);cx.strokeStyle='#ff8a3d';cx.stroke(b)}
+ drawInputs(s,lw);
+ const det=s>10;
+ for(const e of ELS){
+  if(e.t==4){drawBlk(e,s);continue}
+  if(det){if(!vis(e))continue;cx.fillStyle='#0b141d';cx.fillRect(e.x,e.y,e.w,e.h);tdraw(e);leads(e)}
+  else{cx.fillStyle=v[e.o]?GB[e.g]:GD[e.g];cx.fillRect(e.x,e.y,e.w,e.h)}}
+ for(const q of DFFS){
+  if(det){if(!vis(q))continue;cx.fillStyle='#0b141d';cx.fillRect(q.x,q.y,q.w,q.h);tdff(q);leads(q)}
+  else{cx.fillStyle=v[q.q]?GB[q.g]:GD[q.g];cx.fillRect(q.x,q.y,12,8);cx.strokeStyle='#e4edf5';cx.lineWidth=.3;cx.strokeRect(q.x,q.y,12,8)}}
+ if(s>2.5){cx.fillStyle='#e4edf5';const pr=Math.min(.6,2.5/s);for(const q of WIRES)if(vis(q))cx.fillRect(q.x-pr,q.y-pr,2*pr,2*pr)}
+ if(s>3&&!det){cx.font='5px system-ui';cx.fillStyle='#000';ELS.forEach(e=>{if(e.t<4)cx.fillText(['НЕ','И','ИЛИ','XOR'][e.t],e.x+1.5,e.y+6)})}
+ if(sel){cx.strokeStyle='#fff';cx.lineWidth=lw*1.6;cx.strokeRect(sel.x-1,sel.y-1,sel.w+2,sel.h+2)}
+ cx.setTransform(d,0,0,d,0,0);
+ if(hover){const t=hoverText(hover);cx.font='bold 12px system-ui';const tw=cx.measureText(t).width+12;
+  cx.fillStyle='#000c';cx.fillRect(mp.x+12,mp.y-28,tw,22);cx.fillStyle='#ffb547';cx.fillText(t,mp.x+18,mp.y-12)}
+}
+// ===== Выбор, панорама, масштаб =====
+const hit=(px,py)=>{const wx=(px-view.x)/view.s,wy=(py-view.y)/view.s;return all.find(e=>wx>=e.x&&wx<=e.x+e.w&&wy>=e.y&&wy<=e.y+e.h)};
+const outsOf=e=>e.t==5?[e.q]:e.t==4?blocks[e.a].outs:[e.o];
+const val=e=>e.t==5?v[e.q]:e.t==4?'—':v[e.o];
+function select(e){sel=e;
+ if(e){selIn=WIRES.filter(q=>q.e===e);const o=outsOf(e);selOut=WIRES.filter(q=>o.includes(q.n));
+  $('sel').textContent=`Выбрано: ${e.g} · ${NM[e.t]}${e.tc?` · транзисторов: ${e.tc}`:''}. Синие провода — входы, оранжевые — выходы.`}
+ else{selIn=[];selOut=[];$('sel').textContent='Нажмите на элемент — подсветятся его входы и выходы.'}}
+let pan=null,down=null;
+const ptrs=new Map();let pinch=null,moved=0;
+const pp=e=>({x:e.offsetX,y:e.offsetY});
+const pinchState=()=>{const a=[...ptrs.values()];return{d:Math.hypot(a[0].x-a[1].x,a[0].y-a[1].y)||1,x:(a[0].x+a[1].x)/2,y:(a[0].y+a[1].y)/2}};
+sc.onpointerdown=e=>{sc.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,pp(e));
+ if(ptrs.size==1){pan={x:e.offsetX-view.x,y:e.offsetY-view.y};down={x:e.offsetX,y:e.offsetY};moved=0;sc.style.cursor='grabbing'}
+ else if(ptrs.size==2){pan=null;down=null;pinch=pinchState()}};
+sc.onpointermove=e=>{mp={x:e.offsetX,y:e.offsetY};
+ if(ptrs.has(e.pointerId))ptrs.set(e.pointerId,pp(e));
+ if(ptrs.size>=2&&pinch){const n=pinchState();zoom(n.d/pinch.d,pinch.x,pinch.y);view.x+=n.x-pinch.x;view.y+=n.y-pinch.y;pinch=n;return}
+ if(pan){view.x=e.offsetX-pan.x;view.y=e.offsetY-pan.y}hover=hit(mp.x,mp.y)||null};
+sc.onpointerup=e=>{const was=ptrs.size;ptrs.delete(e.pointerId);
+ if(was>=2){pinch=null;pan=null;down=null;const r=[...ptrs.values()][0];if(r)pan={x:r.x-view.x,y:r.y-view.y};sc.style.cursor='grab';return}
+ if(down&&Math.hypot(e.offsetX-down.x,e.offsetY-down.y)<6){const bk=inputHit((e.offsetX-view.x)/view.s,(e.offsetY-view.y)/view.s);if(bk&&powered)pressKey(bk);else select(hit(e.offsetX,e.offsetY)||null)};pan=down=null;sc.style.cursor='grab'};
+sc.onpointercancel=e=>{ptrs.delete(e.pointerId);pinch=null;pan=down=null};
+sc.onpointerleave=()=>{hover=null};
+const zoom=(k,x=sc.clientWidth/2,y=sc.clientHeight/2)=>{const s=Math.max(.05,Math.min(60,view.s*k)),f=s/view.s;view.x=x-(x-view.x)*f;view.y=y-(y-view.y)*f;view.s=s};
+sc.onwheel=e=>{e.preventDefault();zoom(e.deltaY<0?1.2:1/1.2,e.offsetX,e.offsetY)};
+$('gB').onclick=()=>goTo(-20,30,Math.min(8,sc.clientWidth/150));$('gR').onclick=()=>{const r=romEl;goTo(r.x+180,r.y+12*num(pcQ)+10,Math.min(5,sc.clientWidth/380))};$('gS').onclick=()=>{const l=ELS.find(e=>e.t==4&&blocks[e.a].kind=='led');goTo(l.x+l.w/2,l.y+l.h/2,Math.min(sc.clientWidth/(l.w+20),sc.clientHeight/(l.h+20)))};
+$('zi').onclick=()=>zoom(1.4);$('zo').onclick=()=>zoom(1/1.4);$('zf').onclick=fitView;
+$('zt').onclick=()=>{const e=sel||hover||ELS.find(g=>g.g=='АЛУ'&&g.t==3);if(!e)return;select(e);const z=Math.min(60,.85*sc.clientWidth/e.w,.75*sc.clientHeight/e.h);view.s=z;view.x=sc.clientWidth/2-(e.x+e.w/2)*z;view.y=sc.clientHeight/2-(e.y+e.h/2)*z};
+select(null);
+
+// ===== Экран, регистры, управление =====
+function pressKey(k){key=k;btnUntil[k-1]=performance.now()+140;flash[k]=performance.now()}
+// ===== Вся система: питание, такт, кнопки, ПЗУ, ОЗУ, видеопамять, экран =====
+const SYS=$('sys'),sg=SYS.getContext('2d'),SW=1280,SH=1650,MONO='ui-monospace,Consolas,monospace';
+const QV='#ff6b6b',QG='#5a9de0',QD='#3a4a5a',QT='#cfe3f3',QM='#8aa3b8',QY='#ffd35a',QA='#7fe0ff',QB='#ffb36b',QW='#6a8099';
+let powered=true,flash={},hits=[],scanPos=0,downK=0,flashRst=0;
+const hx=(n,l=2)=>n.toString(16).toUpperCase().padStart(l,'0');
+const OPN=Object.keys(OPC),JN=['JMP','JZ','JNZ','JC','JNC'];
+function dis(w){const op=w>>12,rd=w>>9&7,im=w>>8&1,s=w&255;
+ if(op==15)return(JN[rd]||'J?')+' '+s;
+ const nm=OPN[op]||'?',src=im?s:'R'+(s&7);
+ if(nm=='TICK')return nm;
+ if(nm=='KEY'||nm=='RND')return nm+' R'+rd;
+ if(nm=='ST'||nm=='VST')return nm+' [R'+rd+'],'+src;
+ if(nm=='LD'||nm=='VLD')return nm+' R'+rd+',['+(im?s:'R'+(s&7))+']';
+ return nm+' R'+rd+','+src}
+const lfQ=(()=>{const i=DFFS.findIndex(d=>d.g=='ГСЧ');return DFFS.slice(i,i+8).map(d=>d.q)})();
+const NG=ELS.filter(e=>e.t<4).length;
+function sRR(x,y,w,h,r=8){sg.beginPath();sg.moveTo(x+r,y);sg.arcTo(x+w,y,x+w,y+h,r);sg.arcTo(x+w,y+h,x,y+h,r);sg.arcTo(x,y+h,x,y,r);sg.arcTo(x,y,x+w,y,r);sg.closePath()}
+function sT(t,x,y,c=QT,f=12,al='left',b=0,fam='system-ui,sans-serif'){sg.fillStyle=c;sg.font=`${b?'bold ':''}${f}px ${fam}`;sg.textAlign=al;sg.fillText(t,x,y)}
+function sB(x,y,w,h,title,col){sg.fillStyle='#14263a';sg.strokeStyle=powered?col:QD;sg.lineWidth=2;sRR(x,y,w,h);sg.fill();sg.stroke();if(title)sT(title,x+10,y+18,powered?col:QM,13,'left',1)}
+function sI(x,y,w,h,t,c){sg.fillStyle='#0f1d2b';sg.strokeStyle=powered?c:QD;sg.lineWidth=1.5;sRR(x,y,w,h,5);sg.fill();sg.stroke();if(t)sT(t,x+7,y+14,powered?c:QM,11,'left',1)}
+function sL(p,c,w=2,dash){sg.strokeStyle=c;sg.lineWidth=w;sg.lineJoin='round';sg.setLineDash(dash||[]);sg.beginPath();p.forEach(([x,y],i)=>i?sg.lineTo(x,y):sg.moveTo(x,y));sg.stroke();sg.setLineDash([])}
+function sD(x,y,c){sg.fillStyle=c;sg.beginPath();sg.arc(x,y,3.5,0,7);sg.fill()}
+function sArr(x,y,dx,dy,c){const px=-dy,py=dx;sg.fillStyle=c;sg.beginPath();sg.moveTo(x,y);sg.lineTo(x-8*dx+4.5*px,y-8*dy+4.5*py);sg.lineTo(x-8*dx-4.5*px,y-8*dy-4.5*py);sg.closePath();sg.fill()}
+function sBus(p,val,c,arrow){const col=powered?c:QD;sg.globalAlpha=powered&&!val?.5:1;sL(p,col,4);if(arrow)sArr(...arrow,col);sg.globalAlpha=1}
+function sGnd(x,y){const c=powered?QG:QD;sL([[x,y],[x,y+7]],c);sL([[x-8,y+7],[x+8,y+7]],c);sL([[x-5,y+11],[x+5,y+11]],c);sL([[x-2,y+15],[x+2,y+15]],c)}
+function sRes(x,y,w,c){sL([[x,y],[x+6,y]],c);sL([[x+w-6,y],[x+w,y]],c);sg.strokeStyle=c;sg.lineWidth=2;sg.strokeRect(x+6,y-5,w-12,10)}
+function sResV(x,y,h,c){sL([[x,y],[x,y+5]],c);sL([[x,y+h-5],[x,y+h]],c);sg.strokeStyle=c;sg.lineWidth=2;sg.strokeRect(x-5,y+5,10,h-10)}
+function sCap(x,y,c){sL([[x,y-26],[x,y]],c);sL([[x-8,y],[x+8,y]],c,3);sL([[x-8,y+6],[x+8,y+6]],c,3);sL([[x,y+6],[x,y+16]],c)}
+function sLed(x,y,col,lit){const c=powered?col:QD;
+ if(lit&&powered){sg.save();sg.globalAlpha=.35;sg.fillStyle=col;sg.beginPath();sg.arc(x+7,y,17,0,7);sg.fill();sg.restore()}
+ sg.fillStyle=lit&&powered?col:'#0f1d2b';sg.strokeStyle=c;sg.lineWidth=2;sg.beginPath();sg.moveTo(x+14,y-8);sg.lineTo(x+14,y+8);sg.lineTo(x,y);sg.closePath();sg.fill();sg.stroke();sL([[x,y-8],[x,y+8]],c)}
+const PIX=['#13251e','#3bff6a','#ff4d4d','#ffe14d'];
+function drawSys(){
+ const d=devicePixelRatio||1,w=SYS.clientWidth;if(!w)return;
+ const pw=Math.round(w*d),ph=Math.round(w*SH/SW*d);
+ if(SYS.width!==pw||SYS.height!==ph){SYS.width=pw;SYS.height=ph;SYS.style.height=w*SH/SW+'px'}
+ sg.setTransform(pw/SW,0,0,pw/SW,0,0);sg.fillStyle='#0d1b2a';sg.fillRect(0,0,SW,SH);hits=[];
+ const now=performance.now(),P=powered,vc=P?QV:QD,gc=P?QG:QD,wc=P?QT:QD;
+ const pc=num(pcQ),inst=ROMW[pc]|0,rg=rfQ.map(q=>num(q)),rI=blocks[1].ins,vI=blocks[2].ins;
+ const ra=num(rI.slice(0,8)),rdv=num(rI.slice(8,16)),pr=k=>downK==k||now-(flash[k]||0)<250;
+ const lit=VR.reduce((n,c)=>n+(c?1:0),0),hz=Math.round(10**$('spd').value),kb=[v[keyN[0]],v[keyN[1]],v[keyN[2]]];
+ if(P)scanPos=(scanPos+7)&255;
+ const sr=scanPos>>4,sc2=scanPos&15;
+
+ // ---------- ПИТАНИЕ ----------
+ sB(20,20,230,280,'ПИТАНИЕ','#ffb547');
+ sL([[36,70],[44,70]],wc);[[44,12],[52,7],[60,12],[68,7]].forEach(([x,h])=>sL([[x,70-h],[x,70+h]],wc,3));
+ sL([[68,70],[100,70]],wc);sT('+',74,62,wc,12,'left',1);sL([[36,70],[36,104]],wc);sGnd(36,104);sT('Батарея 4×AA, 6 В',28,136,QM,10);
+ sD(100,70,wc);sD(130,70,wc);sL(P?[[100,70],[130,70]]:[[100,70],[126,54]],wc,3);
+ sT(P?'ВКЛ':'ВЫКЛ',115,92,P?'#3bff6a':QV,11,'center',1);
+ hits.push({x:92,y:46,w:46,h:52,f:()=>{powered=!powered;if(powered)reset()}});
+ sg.fillStyle='#0f1d2b';sg.strokeStyle=P?'#ffb547':QD;sg.lineWidth=2;sRR(150,52,70,50,5);sg.fill();sg.stroke();
+ sT('LM7805',185,73,wc,12,'center',1);sT('IN',155,86,QM,9);sT('OUT',215,86,QM,9,'right');sT('GND',185,98,QM,9,'center');
+ sL([[130,70],[150,70]],wc);sL([[220,70],[262,70]],vc,3);sL([[185,102],[185,112]],wc);sGnd(185,112);
+ [[140,'C1 100 мкФ',134],[232,'C2 100 нФ',226]].forEach(([x,t,lx])=>{sD(x,70,wc);sCap(x,102,wc);sGnd(x,118);sT(t,lx,148,QM,9,'center')});
+ sD(262,70,vc);
+ sL([[262,185],[236,185]],vc,3);sRes(200,185,36,wc);sL([[200,185],[186,185]],wc);sLed(172,185,'#3bff6a',P);sL([[172,185],[156,185]],wc);sGnd(156,185);sD(262,185,vc);
+ sT('R 330 Ом',218,174,QM,9,'center');sT('светодиод «питание»',36,214,QM,10);
+ const mA=Math.round(14+lit*.9);
+ sT(`Вход: ${P?'6,0':'0'} В`,36,238,wc,12);sT(`Шина +5 В: ${P?'5,0':'0'} В`,36,256,wc,12);sT(`Потребление ≈ ${P?mA:0} мА`,36,274,wc,12);sT('(оценка по числу горящих светодиодов)',36,290,QM,9);
+
+ // ---------- ТАКТ ----------
+ sB(20,316,230,155,'ТАКТ И ТАЙМЕР','#4cc2ff');
+ sT(`частота ЦПУ: ${hz} Гц`,30,352,wc,11);
+ sL([[30,375],[44,375]],wc);sL([[44,365],[44,385]],wc,3);sg.strokeStyle=wc;sg.lineWidth=2;sg.strokeRect(49,367,10,16);sL([[64,365],[64,385]],wc,3);sL([[64,375],[100,375]],wc);
+ sT('кварц 4 МГц',30,404,QM,10);
+ sg.fillStyle='#0f1d2b';sg.strokeStyle=P?'#4cc2ff':QD;sg.lineWidth=1.5;sRR(100,358,70,34,5);sg.fill();sg.stroke();sT('делитель',135,379,wc,11,'center');
+ sI(100,420,70,46,'','#4cc2ff');sT('NE555',135,440,wc,12,'center',1);sT('100 Гц',135,456,QM,11,'center');
+ sT('R 10 кОм',30,436,QM,10);sT('C 1 мкФ',30,452,QM,10);
+ sg.fillStyle=P&&tickG>.3?QY:'#0f1d2b';sg.strokeStyle=P?QY:QD;sg.lineWidth=1.5;sg.beginPath();sg.arc(190,447,5,0,7);sg.fill();sg.stroke();sT('тик',200,451,QM,9);
+ sL([[236,398],[262,398]],vc,3);sD(262,398,vc);sT('+5В',232,402,QM,9,'right');
+
+ // ---------- КНОПКИ ----------
+ sB(20,486,230,314,'КНОПКИ УПРАВЛЕНИЯ','#a6ff8a');
+ sL([[30,526],[236,526]],vc,3);sL([[236,526],[262,526]],vc,3);sD(262,526,vc);sT('+5В',32,520,QM,9);
+ const BT=[[40,1,'▲'],[92,2,'▼'],[144,3,'◀'],[196,4,'▶']];
+ BT.forEach(([x0,k,g])=>{const p=pr(k);
+  sL([[x0,526],[x0,538]],wc);sL([[x0,562],[x0,650]],p&&P?QY:wc,p?3:2);
+  sg.fillStyle='#c8ced6';[[x0-15,541],[x0-15,555],[x0+12,541],[x0+12,555]].forEach(([px,py])=>sg.fillRect(px,py,4,3));
+  sg.fillStyle='#262b32';sRR(x0-12,538,24,24,3);sg.fill();sg.fillStyle='rgba(255,255,255,.12)';sg.fillRect(x0-12,538,24,3);
+  {const cy=550+(p?1.5:0),gr=sg.createRadialGradient(x0-3,cy-3,1,x0,cy,10);gr.addColorStop(0,p&&P?'#8a7a3a':'#6a7482');gr.addColorStop(1,p&&P?'#3a3112':'#171b21');
+   if(p&&P){sg.fillStyle='rgba(255,211,90,.35)';sg.beginPath();sg.arc(x0,cy,13,0,7);sg.fill()}
+   sg.fillStyle=gr;sg.beginPath();sg.arc(x0,cy,9,0,7);sg.fill();sg.strokeStyle=p&&P?QY:'#0a0d11';sg.lineWidth=2;sg.stroke()}
+  sT(g,x0,555,p&&P?QY:P?'#e4edf5':QM,12,'center',1);
+  sL([[x0,596],[x0+14,596]],wc);sD(x0,596,wc);sResV(x0+14,596,28,wc);sGnd(x0+14,624);sT('10к',x0+22,614,QM,9);
+  hits.push({x:x0-20,y:532,w:40,h:30,f:()=>{if(powered){pressKey(k);downK=k}}})});
+ 
+ sI(30,650,200,44,'',P?'#a6ff8a':QD);sT('Шифратор 4→3',38,666,wc,11,'left',1);sT('K0=▲∨◀  K1=▼∨◀  K2=▶',38,682,QM,10);
+ [[70,0],[130,1],[190,2]].forEach(([x,b])=>sL([[x,694],[x,708]],kb[b]&&P?QY:QW,2));
+ sI(30,708,200,48,'',P?'#a6ff8a':QD);sT('Защёлка: 3 D-триггера',38,724,wc,11,'left',1);
+ kb.forEach((b,i)=>{const x=60+i*60;sg.fillStyle=b&&P?QY:'#0f1d2b';sg.strokeStyle=P?QY:QD;sg.lineWidth=1.5;sg.beginPath();sg.arc(x+14,742,6,0,7);sg.fill();sg.stroke();sT('K'+i,x-6,746,QM,10)});
+ sT('СБРОС',34,786,wc,12,'left',1);const rp=now-flashRst<250;
+ sD(96,780,wc);sD(122,780,wc);sL(rp?[[96,780],[122,780]]:[[96,780],[118,768]],rp&&P?QY:wc,3);sL([[30,790],[30,790]],wc);
+ sL([[122,780],[140,780]],wc);sRes(140,780,40,wc);sL([[180,780],[230,780]],wc);
+ sT('R 10 кОм, C 100 нФ — антидребезг',34,798,QM,9);
+ hits.push({x:84,y:764,w:50,h:34,f:()=>{if(powered){reset();flashRst=performance.now()}}});
+
+ // ---------- ПЗУ: матрица из транзисторов ----------
+ sB(320,20,320,242,'ПЗУ 256×16 · транзисторы','#ffd35a');
+ const a0=Math.max(0,Math.min(pc-3,Math.max(0,ROMW.length-8))),selW=a=>P&&v[WLN[a]],bx=k=>394+k*14+5,rowY=i=>76+i*18;
+ sL([[bx(0),48],[bx(15),48]],vc,2);
+ for(let k=0;k<16;k++){const j=15-k,x=bx(k),hi=v[BLN[j]];
+  sL([[x,48],[x,50]],vc,1.5);sg.strokeStyle=P?QT:QD;sg.lineWidth=1.5;sg.strokeRect(x-2.5,50,5,9);sL([[x,59],[x,61]],vc,1.5);
+  sL([[x,61],[x,224]],P?(hi?'#ff9d9d':'#4cc2ff'):QD,2);
+  sL([[x,224],[x,230]],P?QY:QD,1.5);sT(String(j),x,244,QM,8,'center')}
+ sT('+5В',330,52,vc,9);sT('резисторы',330,62,QM,8);
+ sI(326,70,42,138,'','#ffd35a');sT('дешифр.',347,86,wc,8,'center');sT('адреса',347,96,wc,8,'center');sT('A[7:0]',347,203,QM,8,'center');
+ for(let i=0;i<8;i++){const a=a0+i,y=rowY(i),sel=selW(a),cur=P&&a==pc;
+  sL([[368,y],[392,y]],sel?QY:P?'#3a556f':QD,sel?2.5:1.5);sT(hx(a),370,y-3,cur?QY:QM,8,'left',cur,MONO);
+  sL([[392,y],[bx(15)+4,y]],sel?QY:P?'#3a556f':QD,sel?2.5:1.5)}
+ for(let i=0;i<8;i++){const a=a0+i,y=rowY(i),sel=selW(a);if(a>=ROMW.length)continue;
+  for(let k=0;k<16;k++){if(!(ROMW[a]>>(15-k)&1))continue;
+   const xj=394+k*14,c=sel?'#3bff6a':P?'#9fb7cc':QD,lw=sel?2:1.3;
+   sL([[xj-3,y-4],[xj-3,y+4]],c,lw);sL([[xj,y-4],[xj,y+4]],c,lw);sL([[xj,y-4],[xj+5,y-4]],c,1.2);sD(xj+5,y-4,c);sD(xj-3,y,c);
+   sL([[xj,y+4],[xj,y+7]],c,1.2);sL([[xj-2.5,y+7],[xj+2.5,y+7]],c,1.2);sL([[xj-1.2,y+8.6],[xj+1.2,y+8.6]],c,1.2)}}
+ sL([[bx(0),232],[bx(15),232]],P?QY:QD,4);
+ sT(`[0x${hx(pc)}] = 0x${hx(inst,4)}  ${P?dis(inst):''}`,332,257,P?QY:QD,10,'left',0,MONO);
+
+ // ---------- ЦПУ ----------
+ sB(320,290,320,450,'ЦПУ · 8 бит','#4cc2ff');
+ sT(`${NG} вентилей, ${nD} триггеров`,330,324,QM,10);
+ [['CLK',375],['TICK',430],['KEY0',520],['KEY1',540],['KEY2',560],['RST',600]].forEach(([n,y])=>{sD(320,y,wc);sT(n,327,y+4,QM,10)});
+ sI(365,330,120,52,'Счётчик команд','#ffd35a');sT(P?`PC = ${pc}`:'—',372,372,wc,16,'left',1,MONO);
+ sI(495,330,135,52,'Дешифратор','#ff9dd0');sT(P?dis(inst):'—',502,372,wc,13,'left',0,MONO);
+ sI(365,395,265,100,'Регистры (8 × 8 бит)','#a6ff8a');
+ rg.forEach((val,i)=>{const x=372+(i&3)*63,y=414+(i>>2)*40;sg.strokeStyle=P?'#2a4560':QD;sg.lineWidth=1;sg.strokeRect(x,y,58,34);sT('R'+i,x+5,y+12,QM,9);sT(P?String(val):'—',x+5,y+29,wc,14,'left',1,MONO)});
+ sI(365,510,150,70,'АЛУ','#7fe0ff');sT('сумматор, И, ИЛИ,',372,544,wc,10);sT('XOR, сдвиг, сравнение',372,558,wc,10);sT(P?`сейчас: ${OPN[inst>>12]||'JMP/JZ…'}`:'',372,574,QM,10);
+ sI(525,510,105,70,'Флаги','#ffb36b');
+ [[548,'Z',v[zQ]],[600,'C',v[cQ]]].forEach(([x,n,b])=>{sg.fillStyle=b&&P?QY:'#0f1d2b';sg.strokeStyle=P?QY:QD;sg.lineWidth=1.5;sg.beginPath();sg.arc(x,548,8,0,7);sg.fill();sg.stroke();sT(n,x,572,wc,12,'center',1)});
+ sI(365,595,150,50,'ГСЧ (сдвиговый регистр)','#c9a6ff');sT(P?`0x${hx(num(lfQ))}`:'—',372,636,wc,15,'left',1,MONO);
+ sI(525,595,105,50,'Такты','#8aa3b8');sT(P?String(cycN):'—',532,636,wc,13,'left',0,MONO);
+ sT('Маркеры: красная шина — +5 В, синяя — GND.',335,680,QM,10);sT('Внутри ЦПУ — см. схему из вентилей ниже.',335,696,QM,10);
+
+ // ---------- ОЗУ ----------
+ sB(760,20,240,230,'ОЗУ 256×8','#4cc2ff');sT('тело змейки (кольцевой буфер)',770,52,QM,10);
+ for(let i=0;i<256;i++){const x=775+(i&15)*8,y=62+(i>>4)*8,b=RAM[i];sg.fillStyle=P&&b?`rgb(60,${Math.min(255,100+b)|0},${Math.min(255,140+b/2)|0})`:'#0f1d2b';sg.fillRect(x,y,7,7)}
+ if(P){sg.strokeStyle='#fff';sg.lineWidth=1;sg.strokeRect(775+(lastR[0]&15)*8-.5,62+(lastR[0]>>4)*8-.5,8,8)}
+ sT('A',766,114,QM,9);sT('D',766,174,QM,9);sT('WE',766,219,QM,9);
+ sT('Адрес',915,76,QM,10);sT(P?`0x${hx(ra)}`:'—',915,92,wc,13,'left',1,MONO);
+ sT('Данные',915,116,QM,10);sT(P?`0x${hx(rdv)}`:'—',915,132,wc,13,'left',1,MONO);
+ sT('Посл. запись',915,156,QM,10);sT(P?`[${hx(lastR[0])}]=${hx(lastR[1])}`:'—',915,172,wc,12,'left',0,MONO);
+ sg.fillStyle=ramG>.15&&P?'#ff5d5d':'#0f1d2b';sg.strokeStyle=P?'#ff8a8a':QD;sg.lineWidth=1.5;sg.beginPath();sg.arc(922,210,6,0,7);sg.fill();sg.stroke();sT('запись',932,214,QM,10);
+ sT('+5В',996,36,QM,9,'right');
+
+ // ---------- ВИДЕОПАМЯТЬ ----------
+ sB(760,330,240,210,'ВИДЕОПАМЯТЬ 256×2','#3bff6a');sT('два порта: CPU пишет, развёртка читает',770,362,QM,10);
+ for(let i=0;i<256;i++){const x=775+(i&15)*8,y=368+(i>>4)*8;sg.fillStyle=P?PIX[VR[i]]:'#0f1d2b';if(!VR[i])sg.fillStyle='#0f1d2b';sg.fillRect(x,y,7,7)}
+ if(P){sg.strokeStyle='#fff';sg.lineWidth=1;sg.strokeRect(775+(scanPos&15)*8-.5,368+(scanPos>>4)*8-.5,8,8)}
+ sT('A',766,394,QM,9);sT('D',766,434,QM,9);sT('WE',766,504,QM,9);sT('AB',994,371,QM,9,'right');sT('DB',994,411,QM,9,'right');
+ sT('Порт A · ЦПУ',912,376,QM,10);sT(P?`[${hx(lastV[0])}]=${lastV[1]}`:'—',912,392,wc,12,'left',0,MONO);
+ sT('Порт B · экран',912,432,QM,10);sT(P?`адр 0x${hx(scanPos)}`:'—',912,448,wc,12,'left',0,MONO);
+ sg.fillStyle=vrG>.15&&P?'#ff5d5d':'#0f1d2b';sg.strokeStyle=P?'#ff8a8a':QD;sg.lineWidth=1.5;sg.beginPath();sg.arc(922,500,6,0,7);sg.fill();sg.stroke();sT('запись',932,504,QM,10);
+ sT('белая рамка — читаемая клетка',772,526,QM,9);
+
+ // ---------- РАЗВЁРТКА ----------
+ const colv=VR[scanPos],CG='#3bff6a',CRD='#ff4d4d',bin=(n,w)=>n.toString(2).padStart(w,'0');
+ sB(1040,290,230,262,'РАЗВЁРТКА ЭКРАНА','#ff9dd0');
+ sI(1052,324,176,50,'Счётчик развёртки','#ff9dd0');sT(P?`0x${hx(scanPos)}`:'—',1060,364,wc,16,'left',1,MONO);sT(P?bin(scanPos,8):'',1124,364,QM,11,'left',0,MONO);
+ sT('тактируется делителем ÷N',1050,394,QM,10);sT('адрес → видеопамять (порт B)',1050,410,QM,10);sT('данные ← видеопамять (2 бита)',1050,426,QM,10);
+ [[1052,'строка',bin(sr,4)],[1126,'столбец',bin(sc2,4)],[1200,'цвет',bin(colv,2)]].forEach(([x,t,b])=>{sI(x,440,64,54,t,'#ff9dd0');sT(P?b:'—',x+7,480,wc,14,'left',1,MONO)});
+ sT('выходы идут на транзисторы ▼',1155,522,QM,10,'center');
+
+ // ---------- ЭКРАН ИЗ СВЕТОДИОДОВ ----------
+ sB(20,845,1240,785,'ЭКРАН 16×16 НА СВЕТОДИОДАХ · строки — P-транзисторы, столбцы — N-транзисторы','#ff9dd0');
+ const MX=470,MY=1040,PT=26,yr=r=>MY+13+PT*r,xc=c=>MX+13+PT*c,xG=c=>xc(c)-5,xR=c=>xc(c)+5,XE=MX+PT*16-8;
+ const rowOn=r=>P&&r==sr,gOn=c=>P&&c==sc2&&!!(colv&1),rOn=c=>P&&c==sc2&&!!(colv&2);
+ const cn=['нет (клетка пустая)','зелёный','красный','оба (жёлтый)'][colv];
+ sT('Как это работает',300,938,wc,13,'left',1);
+ ['1. Счётчик развёртки по очереди выбирает каждую из 256 клеток.',
+  '2. Дешифратор строк открывает один P-транзистор: на строку идёт +5 В.',
+  '3. Дешифратор столбцов открывает N-транзистор, если в клетке видеопамяти есть цвет.',
+  '4. Ток: +5 В → P-транзистор → светодиод → резистор → N-транзистор → GND.',
+  '5. Клетки сменяются так быстро, что глаз видит их все сразу (тут медленнее для показа).'].forEach((t,i)=>sT(t,300,955+i*15,QM,11));
+ sT(P?`Сейчас ток течёт через клетку: строка ${sr}, столбец ${sc2}, цвет — ${cn}`:'Питание выключено',300,916,P?QY:QM,12,'left',1);
+ // дешифратор строк
+ sI(40,1030,200,430,'Дешифратор строк 4→16','#ff9dd0');sT('(вентили И-НЕ на входе',50,1062,QM,10);sT('и 16 выходов)',50,1076,QM,10);
+ sT(P?`строка = ${sr}`:'',50,1100,wc,13,'left',1,MONO);
+ for(let r=0;r<16;r++)sT(String(r),232,yr(r)-10,rowOn(r)?QY:QM,9,'right',rowOn(r),MONO);
+ // шина +5В и затворы
+ sL([[398,1026],[398,yr(15)]],vc,3);sL([[388,1026],[408,1026]],vc,3);sT('+5 В',384,1022,vc,11,'right',1);
+ for(let r=0;r<16;r++){const y=yr(r),on=rowOn(r),cg=on?QY:P?QW:QD,cl=on?QY:P?'#5f7690':QD;
+  sL([[240,y-13],[424,y-13],[424,y-8.5]],cg,on?3:1.5);
+  sL([[398,y],[412,y]],vc,3);sD(398,y,vc);
+  sL([[412,y],[436,y]],on?QY:wc,3);sL([[412,y-4],[436,y-4]],on?QY:wc,2.5);
+  sg.strokeStyle=on?QY:wc;sg.lineWidth=1.5;sg.beginPath();sg.arc(424,y-6.6,2,0,7);sg.stroke();
+  sL([[436,y],[XE,y]],cl,on?3.5:1.6)}
+ // столбцы, светодиоды, резисторы, N-транзисторы
+ for(let c=0;c<16;c++)[0,1].forEach(ch=>{const x=ch?xR(c):xG(c),on=ch?rOn(c):gOn(c),col=ch?CRD:CG,y0=ch?1512:1480;
+  sL([[x,yr(0)],[x,1451]],on?col:P?(ch?'#7a4545':'#3d6a52'):QD,on?3:1.5);
+  sg.strokeStyle=P?QT:QD;sg.lineWidth=1.5;sg.strokeRect(x-2.5,1451,5,9);
+  sL([[x,1460],[x,y0-7]],on?col:P?(ch?'#7a4545':'#3d6a52'):QD,on?3:1.5);
+  const nc=on?col:P?'#9fb7cc':QD;
+  sL([[x,y0-7],[x,y0+7]],nc,3);sL([[x-4,y0-6],[x-4,y0+6]],nc,2);
+  sL([[x,y0+7],[x,ch?1524:1492]],nc,2);sD(x,ch?1524:1492,gc);
+  sL([[x-4,y0],[x-10,y0],[x-10,1558]],on?QY:P?QW:QD,on?3:1.5)});
+ sL([[456,1492],[XE,1492]],gc,3);sL([[456,1524],[XE,1524]],gc,3);sL([[456,1492],[456,1524]],gc,3);sGnd(456,1524);
+ for(let r=0;r<16;r++)for(let c=0;c<16;c++){const b=VR[r*16+c];[0,1].forEach(ch=>{
+  const x=ch?xR(c):xG(c),y=yr(r),on=P&&(b>>ch&1),col=ch?CRD:CG;
+  if(on){sg.shadowBlur=10;sg.shadowColor=col}
+  domeLed(sg,x,y,4.6,ch,on?1:P?0:-1,false);sg.shadowBlur=0})}
+ if(P){sg.strokeStyle='#fff';sg.lineWidth=1.8;sg.beginPath();sg.arc(xc(sc2),yr(sr),12,0,7);sg.stroke()}
+ for(let c=0;c<16;c++)sT(String(c),xc(c),1031,c==sc2&&P?QY:QM,9,'center',c==sc2&&P,MONO);
+ // дешифратор столбцов
+ sI(440,1558,470,54,'Дешифратор столбцов 4→16 + выбор цвета (32 затвора)','#ff9dd0');
+ sT(P?`столбец = ${sc2}    цвет = ${cn}`:'',450,1600,wc,13,'left',1,MONO);
+ sg.fillStyle=CG;sg.fillRect(40,1500,10,10);sT('зелёный светодиод (бит 0 в видеопамяти)',56,1510,QM,11);
+ sg.fillStyle=CRD;sg.fillRect(40,1520,10,10);sT('красный светодиод (бит 1 в видеопамяти)',56,1530,QM,11);
+ sT('У каждой клетки два светодиода на одной строке.',40,1556,QM,10);sT('Резистор 330 Ом стоит на каждой линии столбца.',40,1572,QM,10);sT('Белый круг — клетка, через которую течёт ток сейчас.',40,1588,QM,10);
+
+ // ---------- ПРОВОДА ----------
+ const tk=P&&tickG>.3,gap=(x1,y1,x2,y2)=>[[x1,y1],[x2,y2]];
+ sL([[262,8],[1030,8]],vc,3);sL([[262,8],[262,540]],vc,3);sL([[1030,8],[1030,345]],vc,3);sL([[314,8],[314,305],[320,305]],vc,3);sL([[630,8],[630,48]],vc,3);
+ sL([[1000,45],[1030,45]],vc,3);sL([[1000,345],[1030,345]],vc,3);sL([[1030,310],[1040,310]],vc,3);
+ [[314,8],[630,8],[1030,45],[1030,345],[1030,310],[262,8],[630,48]].forEach(([x,y])=>sD(x,y,vc));
+ sT('+5 В',270,22,vc,11,'left',1);
+ sL([[276,810],[1170,810]],gc,3);sL([[276,810],[276,110]],gc,3);sL([[308,810],[308,215],[320,215]],gc,3);sL([[480,740],[480,810]],gc,3);
+ sL([[1016,810],[1016,235]],gc,3);sL([[1000,235],[1016,235]],gc,3);sL([[1000,520],[1016,520]],gc,3);sL([[1016,520],[1040,520]],gc,3);
+ [[308,810],[480,810],[1016,235],[1016,520],[276,110]].forEach(([x,y])=>sD(x,y,gc));
+ sT('GND',1176,815,gc,11,'left',1);
+ sL(gap(170,375,320,375),P?QY:QD,2);sD(170,375,P?QY:QD);sT('CLK',178,368,QM,9);
+ sL(gap(170,430,320,430),tk?QY:P?QW:QD,2);sT('TICK',178,423,QM,9);
+ [[284,732,520,0],[289,740,540,1],[294,748,560,2]].forEach(([ex,y,ty,b])=>sL([[230,y],[ex,y],[ex,ty],[320,ty]],P?(kb[b]?QY:QW):QD,2));
+ sL([[230,780],[299,780],[299,600],[320,600]],P?(rp?QY:QW):QD,2);
+ sBus([[440,330],[440,287],[346,287],[346,208]],pc,QA,[346,210,0,-1]);sT(`A[7:0]=0x${hx(pc)}`,352,279,P?QA:QD,11,'left',0,MONO);
+ sBus([[560,232],[560,330]],inst,QY,[560,328,0,1]);sT(`D[15:0]=0x${hx(inst,4)}`,568,280,P?QY:QD,11,'left',0,MONO);
+ sBus([[630,420],[680,420],[680,110],[760,110]],ra,QA,[758,110,1,0]);sBus([[680,390],[760,390]],ra,QA,[758,390,1,0]);sD(680,390,P?QA:QD);
+ sBus([[630,460],[715,460],[715,170],[760,170]],rdv,QB,[758,170,1,0]);sBus([[715,430],[760,430]],rdv,QB,[758,430,1,0]);sD(715,430,P?QB:QD);
+ sT(`MA[7:0]=0x${hx(ra)}`,650,62,P?QA:QD,11,'left',0,MONO);sT(`MD[7:0]=0x${hx(rdv)}`,650,80,P?QB:QD,11,'left',0,MONO);
+ sT('MA',646,414,QM,10);sT('MD',646,454,QM,10);
+ const wr=(g)=>P?(g>.15?'#ff5d5d':'#8a5a5a'):QD;
+ sL([[630,520],[738,520],[738,215],[760,215]],wr(ramG),2);sT('RAM_WE',646,516,QM,10);
+ sL([[630,550],[748,550],[748,500],[760,500]],wr(vrG),2);sT('VRAM_WE',646,546,QM,10);
+ sBus([[1040,367],[1000,367]],scanPos,QA,[1002,367,-1,0]);
+ sBus([[1000,407],[1040,407]],colv,'#b5ff8a',[1038,407,1,0]);
+ sBus([[1084,494],[1084,880],[140,880],[140,1030]],sr,QA,[140,1028,0,1]);sT('строка[3:0]',150,874,QM,10);
+ sBus([[1158,494],[1158,900],[940,900],[940,1580],[910,1580]],sc2,'#ffe14d',[912,1580,-1,0]);sT('столбец[3:0]',950,894,QM,10);
+ sBus([[1232,494],[1232,920],[960,920],[960,1596],[910,1596]],colv,'#b5ff8a',[912,1596,-1,0]);sT('цвет[1:0]',970,914,QM,10);
+}
+SYS.onpointerdown=e=>{const r=SYS.getBoundingClientRect(),s=SW/r.width,px=(e.clientX-r.left)*s,py=(e.clientY-r.top)*s;
+ const h=hits.find(q=>px>=q.x&&px<=q.x+q.w&&py>=q.y&&py<=q.y+q.h);if(h){h.f();e.preventDefault()}};
+SYS.onpointerup=SYS.onpointerleave=()=>{downK=0};
+
+const x=$('scr').getContext('2d');
+function drawScr(){
+ x.fillStyle='#08130f';x.fillRect(0,0,320,320);
+ for(let i=0;i<256;i++){const c=VR[i],px=(i&15)*20+10,py=(i>>4)*20+10;if(c){x.shadowBlur=12;x.shadowColor=c==2?'#ff4d4d':'#3bff6a';domeLed(x,px,py,8.6,c==2?1:0,1,false);x.shadowBlur=0}else{x.fillStyle='#0d1e18';x.beginPath();x.arc(px,py,6.4,0,7);x.fill();x.fillStyle='#16352a';x.beginPath();x.arc(px,py,4.6,0,7);x.fill();x.fillStyle='rgba(255,255,255,.18)';x.beginPath();x.arc(px-1.6,py-1.8,1.3,0,7);x.fill()}}
+ x.shadowBlur=0;if(!powered){x.fillStyle='rgba(0,0,0,.88)';x.fillRect(0,0,320,320)}
+ const h=n=>String(n).padStart(3);
+ $('reg').textContent=`PC=${h(num(pcQ))}  Z=${v[zQ]} C=${v[cQ]}\n`+rfQ.map((q,i)=>`R${i}=${h(num(q))}`).join('  ')}
+let running=true,carry=0,last=0,tA=0;
+let lastRomUI=0;
+function romUI(t){if(t-lastRomUI<200)return;lastRomUI=t;const el=$('romlive');if(!el||!el.offsetParent)return;
+ const pcv=num(pcQ),a0=Math.max(0,Math.min(pcv-3,Math.max(0,ROMW.length-8)));let h='<table><tr><th>слово</th><th colspan="16">биты 15 … 0 (■ = транзистор есть)</th><th>команда</th></tr>';
+ for(let i=0;i<8&&a0+i<ROMW.length;i++){const a=a0+i,w=ROMW[a];h+=`<tr class="${a==pcv?'cur':''}"><td>${hx(a)}</td>`;for(let j=15;j>=0;j--)h+=`<td class="${w>>j&1?'one':'zero'}">${w>>j&1?'■':'□'}</td>`;h+=`<td>${dis(w)}</td></tr>`}
+ el.innerHTML=h+'</table><p>Подсвеченная строка — то, что процессор читает прямо сейчас.</p>'}
+function frame(t){romUI(t);
+ const dt=Math.min(100,t-last);last=t;tA+=dt;if(tA>=10){tickL=1;tickG=1;tA%=10}ramG*=.93;vrG*=.93;tickG*=.8
+ if(running&&powered){carry+=10**$('spd').value*dt/1000;let n=Math.min(carry|0,400);carry=Math.min(carry-n,5);while(n--)cycle()}
+ setIn();evalAll();drawScr();drawSys();drawSch();requestAnimationFrame(frame)}
+function build(){try{ROMW=asm($('src').value);if(ROMW.length>256)throw 'Программа длиннее 256 слов';programROM();updStat();reset();running=true;$('bRun').textContent='Пауза';$('msg').className='';$('msg').textContent=`Записано в ПЗУ: ${ROMW.length} слов по 16 бит`}catch(e){$('msg').className='err';$('msg').textContent=String(e)}}
+$('bAsm').onclick=build;
+$('bRun').onclick=()=>{running=!running;$('bRun').textContent=running?'Пауза':'Пуск'};
+$('bStep').onclick=()=>{running=false;$('bRun').textContent='Пуск';cycle()};
+$('spd').oninput=()=>$('hz').textContent=Math.round(10**$('spd').value)+' Гц';
+document.querySelectorAll('#pad button,#kp button').forEach(b=>b.onpointerdown=e=>{e.preventDefault();if(powered)pressKey(+b.dataset.k)});
+addEventListener('keydown',e=>{if(/TEXTAREA|INPUT/.test(e.target.tagName))return;
+ const k={ArrowUp:1,w:1,ArrowDown:2,s:2,ArrowLeft:3,a:3,ArrowRight:4,d:4}[e.key];if(k){if(powered)pressKey(k);e.preventDefault()}});
+function updStat(){let rt=0;ROMW.forEach(w=>{while(w){rt+=w&1;w>>=1}});const TR=ELS.reduce((n,e)=>n+(e.tc||0),0)+nD*20+rt;
+ $('stat').textContent=`Схема: ${ELS.filter(e=>e.t<4).length} вентилей и ${nD} D-триггеров. ПЗУ: дешифратор из вентилей + матрица из ${rt} транзисторов. Всего ≈ ${TR} КМОП-транзисторов (НЕ=2, И/ИЛИ=6, XOR=16, триггер=20). ОЗУ и видеопамять — готовые блоки памяти.`}
+$('src').value=SNAKE;$('spd').oninput();reset();build();fitView();requestAnimationFrame(frame);
+</script></body></html>
